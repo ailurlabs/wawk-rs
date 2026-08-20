@@ -1,0 +1,36 @@
+/** Canonical WIT interface for wawk plugins.
+ *
+ * This is the single source of truth for the plugin contract.
+ * All plugins export this interface. All hosts (wawk-wasi, wawk-bindgen)
+ * import it - either via WIT composition or via a JS bridge that speaks
+ * the canonical ABI.
+ */
+
+package wawk:plugins;
+
+/// Plugin interface for extending wawk with custom functions.
+///
+/// When the AWK evaluator encounters an unknown function name,
+/// it calls `call`. The plugin returns `some(result)` if it handles
+/// the function, or `none` to pass to the next plugin / report
+/// "unknown function".
+interface external-functions {
+    /// Dispatch a function call with string arguments.
+    ///
+    /// # Arguments
+    /// * `name` - The AWK function name (e.g. "greet")
+    /// * `args` - The arguments as strings
+    ///
+    /// # Returns
+    /// * `some(result)` - The function was handled; result is the return value
+    /// * `none` - This plugin does not handle the given function name
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// World for wawk plugins.
+///
+/// Plugins export `external-functions`. The host imports it
+/// (via WIT composition or canonical ABI bridge).
+world wawk-plugin {
+    export external-functions;
+}

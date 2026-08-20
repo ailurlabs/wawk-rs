@@ -1,0 +1,48 @@
+# Build artifacts
+/target/
+/dist/
+
+# Wasm-pack build output
+/pkg/
+/pkg-node/
+/pkg-node-test/
+/pkg-web/
+
+# Wrangler cache
+.wrangler/
+
+# Built Wasm binaries (keep test fixtures)
+**/*.wasm
+!crates/wawk-core/tests/fixtures/*.wasm
+
+# Backup files
+**/*.rs.bk
+**/*.bak
+**/*.tmp
+**/*~
+
+# MSVC Windows debugging
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*#
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cargo lock for libraries (optional - keep for reproducibility)
+# Cargo.lock
+
+# Runtime/test harness
+/run/
+
+# NPM package build outputs
+/npm/wawk.js
+/npm/wawk.wasm
+/npm/wawk.d.ts
+/npm/pkg-temp/
