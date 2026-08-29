@@ -1,0 +1,16 @@
+[package]
+name = "wawk-PLUGINNAME"
+description = "wawk plugin: PLUGIN_DESCRIPTION"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wit-bindgen = "0.42.0"
+serde_json = "1"
+
+[dev-dependencies]
+# Add test dependencies here

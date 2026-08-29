@@ -1,0 +1,22 @@
+[package]
+name = "wawk-wasi"
+description = "Pure WASI wrapper for wawk-core — runs as a sandboxed Wasm module under wasmtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+keywords = ["awk", "wasm", "wasi", "text-processing", "posix"]
+categories = ["wasm", "text-processing"]
+repository = "https://github.com/ailurlabs/wawk-rs"
+
+[[bin]]
+name = "wawk"
+path = "src/main.rs"
+
+[features]
+default = []
+plugins = []
+
+[dependencies]
+wawk-core = { workspace = true }
+memchr = "2"

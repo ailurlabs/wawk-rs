@@ -1,0 +1,32 @@
+[package]
+name = "wawk-bindgen"
+description = "Pure Wasm-bindgen AWK module for browser and Node.js — NPM: @wawk/core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+keywords = ["awk", "wasm", "webassembly", "text-processing", "posix"]
+categories = ["wasm", "text-processing"]
+repository = "https://github.com/ailurlabs/wawk-rs"
+
+[lib]
+name = "wawk_bindgen"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wawk-core = { workspace = true }
+wasm-bindgen = "0.2"
+serde_json = "1"
+js-sys = "0.3"
+getrandom = { version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+serde_json = "1"
+
+# wasm-pack configuration for NPM publishing
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false
