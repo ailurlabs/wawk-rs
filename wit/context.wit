@@ -1,0 +1,74 @@
+/// Request context interface for accessing per-request data.
+///
+/// This interface allows plugins to access HTTP headers and environment
+/// variables that are scoped to the current request. The host (e.g., wawk-mcp)
+/// implements this interface and provides it to plugins via WIT composition.
+///
+/// ## Design Rationale
+///
+/// Per-request data (like API keys in HTTP headers) cannot be passed through
+/// container-level environment variables, which are set at startup. Instead,
+/// the host injects request-scoped data through this interface, allowing
+/// plugins to read headers like `x-api-key` without polluting the function
+/// argument signature.
+///
+/// ## Usage
+///
+/// Plugins import this interface and call `get-header` or `get-env` to read
+/// request-scoped values:
+///
+/// ```rust
+/// use bindings::wawk::context::request_context;
+///
+/// fn get_api_key() -> String {
+///     request_context::get_header("x-api-key")
+///         .or_else(|| request_context::get_env("XLEAD_API_KEY"))
+///         .unwrap_or_else(|| "default-key".to_string())
+/// }
+/// ```
+
+package wawk:context;
+
+/// Request context interface for accessing per-request HTTP headers and env vars.
+///
+/// The host implements this interface to provide plugins with access to
+/// request-scoped data. Each request may have different headers (e.g.,
+/// different API keys for different clients), and this interface allows
+/// plugins to read those headers without requiring changes to the
+/// `external-functions.call` signature.
+interface request-context {
+    /// Get an HTTP header value from the current request.
+    ///
+    /// Header names are case-insensitive. Returns `none` if the header
+    /// is not present in the current request.
+    ///
+    /// # Arguments
+    /// * `name` - The header name (e.g., "x-api-key", "authorization")
+    ///
+    /// # Returns
+    /// * `some(value)` - The header value if present
+    /// * `none` - The header is not in the current request
+    get-header: func(name: string) -> option<string>;
+
+    /// Get an environment variable from the current request context.
+    ///
+    /// This provides access to request-scoped environment variables that
+    /// may differ from the container-level environment. Returns `none` if
+    /// the variable is not set.
+    ///
+    /// # Arguments
+    /// * `name` - The environment variable name (e.g., "XLEAD_API_KEY")
+    ///
+    /// # Returns
+    /// * `some(value)` - The environment variable value if set
+    /// * `none` - The variable is not set in the current request context
+    get-env: func(name: string) -> option<string>;
+}
+
+/// World for request context.
+///
+/// Hosts (like wawk-mcp) export this interface. Plugins import it to
+/// access per-request data.
+world context-world {
+    export request-context;
+}
