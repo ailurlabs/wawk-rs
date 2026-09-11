@@ -34,7 +34,7 @@ assert_eq!(writer.output, "hello\nworld\n");
 
 ### Browser (wasm-bindgen)
 ```javascript
-import init, { exec_awk } from './wawk_bindgen.js';
+import init, { exec_awk } from './wawk.js';
 await init();
 const result = exec_awk('{ print $1, $2 }', 'hello world\nfoo bar\n');
 ```
@@ -64,7 +64,9 @@ Two plugin interfaces:
 - **External Functions**: Export callable functions from Wasm to AWK
 - **Format Handler**: Custom input/output format detection, parsing, and serialization
 
-Plugins are standard WebAssembly components built with `wasm32-wasip2` target.
+Plugins are standard WebAssembly components built to the `wasm32-wasip2` target with `cargo component build` and the `wit-bindgen` v0.42 binding generator.
+
+> **Note:** `wawk-calc` was renamed to `wawk-formula` in Phase 4 (repo `wawk-calc` → `wawk-formula`, crate `wawk_calc` → `wawk_formula`). Its entry point was renamed `formula_eval` → `eval` and now lives in the `formula` namespace.
 
 #### Namespace System
 Each plugin declares a namespace in its `__meta__` JSON. Functions are called using qualified notation:
@@ -130,6 +132,16 @@ Security-by-design with Wasm sandboxing. See [SECURITY.md](SECURITY.md) for deta
 | Object keys | 10,000 |
 | Audit log | 1024 entries |
 | Loop iterations | 100,000,000 |
+
+**SecurityProfile presets** (engine-level deployment tuning; all presets enforce the limits above):
+
+| Preset | Execution timeout | Memory limit | Audit log | Record audit | Intended use |
+|--------|-------------------|--------------|-----------|--------------|--------------|
+| `default` | 300 s | 256 MB | On | Off | General-purpose processing |
+| `strict` | 30 s | 64 MB | On | On | Untrusted input, web-facing services |
+| `relaxed` | 600 s | 512 MB | Off | Off | Trusted internal batch workloads |
+
+**Stack depth:** worker threads run with a 64 MB stack, so deeply nested expressions and recursive user functions fail on the engine's call-depth ceiling (256) instead of a native stack overflow.
 
 **Sandbox properties:**
 - `system()` blocked via `BlockedCommandExecutor`
