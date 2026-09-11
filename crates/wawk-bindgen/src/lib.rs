@@ -140,7 +140,6 @@ fn create_evaluator<'a>(
 
 /// Execute an AWK script with the given input data and return the output.
 ///
-/// Plugin functions (e.g. `greet()`, `sha256()`) are available when a
 ///
 /// # Arguments
 /// * `script` - The AWK program to execute
