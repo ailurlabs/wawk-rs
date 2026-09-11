@@ -64,7 +64,39 @@ Two plugin interfaces:
 - **External Functions**: Export callable functions from Wasm to AWK
 - **Format Handler**: Custom input/output format detection, parsing, and serialization
 
-Plugins are standard WebAssembly components built with `wasm32-unknown-unknown` target.
+Plugins are standard WebAssembly components built with `wasm32-wasip2` target.
+
+#### Namespace System
+Each plugin declares a namespace in its `__meta__` JSON. Functions are called using qualified notation:
+
+```awk
+# Qualified call: namespace.function(args)
+result = formula.sum(1, 2, 3)
+hash = crypto.sha256("hello")
+expr = cel.eval("x > 5")
+```
+
+The `@namespace` directive sets a default namespace for unqualified calls:
+
+```awk
+@namespace "formula"
+BEGIN {
+    # Unqualified calls resolve via default namespace
+    x = sum(1, 2, 3)    # equivalent to formula.sum(1, 2, 3)
+}
+```
+
+Available plugin namespaces:
+
+| Namespace | Plugin | Functions |
+|-----------|--------|-----------|
+| `formula` | wawk-formula | sum, eval, average, min, max, ... |
+| `crypto` | wawk-crypto | sha256, md5, hmac, ... |
+| `cel` | wawk-cel | eval, size, map, filter, ... |
+| `jsonata` | wawk-jsonata | eval, path, ... |
+| `oauth` | wawk-oauth | validate, claims, ... |
+| `feel` | wawk-feel | eval, unary_test, ... |
+| `hello` | wawk-hello | greet, echo |
 
 See [SPEC.md](SPEC.md) §3 for the full plugin specification.
 
@@ -120,7 +152,7 @@ cargo test --test security_tests
 python3 crates/wawk-bindgen/tests/wasmtime_tests.py
 ```
 
-**269+ tests**, all passing.
+**228+ tests**, all passing.
 
 ## Delivery Vehicles
 

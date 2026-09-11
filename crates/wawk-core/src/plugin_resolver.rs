@@ -5,8 +5,8 @@
 //! reported as skipped (not errored) — the host logs a warning and
 //! continues without them.
 
-use std::collections::{HashMap, HashSet, VecDeque};
 use crate::plugin_meta::PluginMeta;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// A plugin that has been resolved and is ready for activation.
 #[derive(Debug)]
@@ -40,10 +40,8 @@ pub struct SkippedPlugin {
 /// Cycle detection: if a dependency cycle is found, all plugins in the cycle
 /// are skipped.
 pub fn resolve(plugins: Vec<PluginMeta>) -> ResolutionResult {
-    let name_to_meta: HashMap<&str, &PluginMeta> = plugins
-        .iter()
-        .map(|m| (m.name.as_str(), m))
-        .collect();
+    let name_to_meta: HashMap<&str, &PluginMeta> =
+        plugins.iter().map(|m| (m.name.as_str(), m)).collect();
 
     // in_degree[X] = number of X's dependencies that exist in the plugin set
     let mut in_deg: HashMap<&str, usize> = HashMap::new();
@@ -89,7 +87,9 @@ pub fn resolve(plugins: Vec<PluginMeta>) -> ResolutionResult {
     // Add ordered plugins (deps satisfied, no cycle)
     for (idx, &name) in order.iter().enumerate() {
         let meta = name_to_meta[name].clone();
-        let missing: Vec<String> = meta.requires.iter()
+        let missing: Vec<String> = meta
+            .requires
+            .iter()
             .filter(|r| !name_to_meta.contains_key(r.as_str()))
             .cloned()
             .collect();
@@ -105,8 +105,7 @@ pub fn resolve(plugins: Vec<PluginMeta>) -> ResolutionResult {
 
     // Skip cycle members
     for m in &plugins {
-        if !ordered_set.contains(m.name.as_str())
-            && !skipped.iter().any(|s| s.meta.name == m.name)
+        if !ordered_set.contains(m.name.as_str()) && !skipped.iter().any(|s| s.meta.name == m.name)
         {
             skipped.push(SkippedPlugin {
                 meta: m.clone(),
@@ -126,6 +125,7 @@ mod tests {
         PluginMeta {
             name: name.into(),
             version: "0.1.0".into(),
+            namespace: None,
             requires: requires.iter().map(|s| s.to_string()).collect(),
             description: None,
             functions: Vec::new(),
@@ -147,11 +147,7 @@ mod tests {
 
     #[test]
     fn simple_chain() {
-        let result = resolve(vec![
-            meta("c", &["b"]),
-            meta("a", &[]),
-            meta("b", &["a"]),
-        ]);
+        let result = resolve(vec![meta("c", &["b"]), meta("a", &[]), meta("b", &["a"])]);
         assert_eq!(result.active.len(), 3);
         assert!(result.skipped.is_empty());
         let names: Vec<&str> = result.active.iter().map(|p| p.meta.name.as_str()).collect();
@@ -162,10 +158,7 @@ mod tests {
 
     #[test]
     fn missing_dep_skipped() {
-        let result = resolve(vec![
-            meta("a", &[]),
-            meta("b", &["missing"]),
-        ]);
+        let result = resolve(vec![meta("a", &[]), meta("b", &["missing"])]);
         assert_eq!(result.active.len(), 1);
         assert_eq!(result.active[0].meta.name, "a");
         assert_eq!(result.skipped.len(), 1);
@@ -174,10 +167,7 @@ mod tests {
 
     #[test]
     fn cycle_detected() {
-        let result = resolve(vec![
-            meta("a", &["b"]),
-            meta("b", &["a"]),
-        ]);
+        let result = resolve(vec![meta("a", &["b"]), meta("b", &["a"])]);
         // Both in cycle should be skipped
         assert_eq!(result.active.len(), 0);
         assert_eq!(result.skipped.len(), 2);

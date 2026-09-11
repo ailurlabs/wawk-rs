@@ -384,7 +384,6 @@ pub trait FunctionDispatcher: PluginCapability {
     }
 }
 
-
 /// Trait for format dispatcher capability.
 ///
 /// Format dispatchers provide format detection, parsing, and serialization.
@@ -394,16 +393,18 @@ pub trait FunctionDispatcher: PluginCapability {
 pub trait FormatDispatcher: PluginCapability + Send + Sync {
     /// Format name (e.g., "json", "csv")
     fn name(&self) -> &str;
-    
+
     /// Detect if input matches this format
     fn detect(&self, input: &str) -> bool;
-    
+
     /// Parse input into PropertyTree
     fn parse(&self, input: &str) -> crate::error::AwkResult<crate::types::PropertyTree>;
-    
+
     /// Serialize PropertyTree to this format
     fn serialize(&self, tree: &crate::types::PropertyTree) -> Option<String>;
-    
+
     /// Priority (lower = higher priority)
-    fn priority(&self) -> u32 { 100 }
+    fn priority(&self) -> u32 {
+        100
+    }
 }

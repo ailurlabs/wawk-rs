@@ -5,24 +5,18 @@
 //! dependencies.
 //!
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
 use wawk_core::error::AwkResult;
 use wawk_core::eval::Evaluator;
 use wawk_core::traits::SandboxIncludeResolver;
-use wawk_core::traits::{
-    AwkCommandExecutor, AwkEnvironment, AwkReader, AwkWriter,
-    FunctionDispatcher, PluginCapability,
-};
+use wawk_core::traits::{AwkCommandExecutor, AwkEnvironment, AwkReader, AwkWriter};
 use wawk_core::{parser, preprocessor};
 
 /// Maximum script size (1MB) to prevent DoS
 const MAX_SCRIPT_SIZE: usize = 1_048_576;
 /// Maximum input size (10MB) to prevent DoS
 const MAX_INPUT_SIZE: usize = 10 * 1024 * 1024;
-
 
 // ============================================================================
 // In-memory Reader
@@ -125,110 +119,10 @@ impl AwkCommandExecutor for WebCommandExecutor {
 }
 
 // ============================================================================
-// JS Plugin Bridge — routes unknown function calls to JS-loaded WIT plugins
+// Evaluator factory — shared setup
 // ============================================================================
 
-// Thread-local storage for the JS plugin dispatch function.
-// The JS host calls `set_plugin_dispatch(fn)` to register a callback.
-// When the AWK evaluator encounters an unknown function, it calls
-// this JS function with (name, args_array) → string | null.
-thread_local! {
-    static JS_PLUGIN_DISPATCH: RefCell<Option<JsValue>> = const { RefCell::new(None) };
-}
-
-/// Register a JS function for plugin dispatch.
-///
-/// The JS function signature: `(name: string, args: string[]) => string | null`
-/// - Return a string result if the plugin handles the function
-/// - Return `null` if no plugin handles it (unknown function)
-///
-/// # Example (JS side)
-/// ```js
-/// import { set_plugin_dispatch, exec_awk } from '@wawk/core';
-///
-/// // Load plugin WASM modules and create dispatch
-/// async function setupPlugins(pluginUrls) {
-///   const plugins = await Promise.all(
-///     pluginUrls.map(url => WebAssembly.instantiateStreaming(fetch(url), imports))
-///   );
-///   set_plugin_dispatch((name, args) => {
-///     for (const plugin of plugins) {
-///       const result = plugin.instance.exports.call(name, args);
-///       if (result !== null) return result;
-///     }
-///     return null;
-///   });
-/// }
-/// ```
-#[wasm_bindgen]
-pub fn set_plugin_dispatch(dispatch_fn: JsValue) {
-    JS_PLUGIN_DISPATCH.with(|cell| {
-        *cell.borrow_mut() = Some(dispatch_fn);
-    });
-}
-
-/// Clear the plugin dispatch function (no more plugin calls).
-#[wasm_bindgen]
-pub fn clear_plugin_dispatch() {
-    JS_PLUGIN_DISPATCH.with(|cell| {
-        *cell.borrow_mut() = None;
-    });
-}
-
-/// Bridge struct that implements `FunctionDispatcher` by calling JS.
-struct JsPluginBridge {
-    dispatch: Rc<RefCell<JsValue>>,
-}
-
-impl PluginCapability for JsPluginBridge {
-    fn capability_name(&self) -> &'static str {
-        "js_function_dispatch"
-    }
-}
-
-impl FunctionDispatcher for JsPluginBridge {
-    fn dispatch(&mut self, name: &str, args: &[String]) -> AwkResult<Option<String>> {
-        let js_fn = self.dispatch.borrow().clone();
-        if js_fn.is_undefined() || js_fn.is_null() {
-            return Ok(None);
-        }
-
-        let js_name = JsValue::from_str(name);
-        let js_args = js_sys::Array::new();
-        for arg in args {
-            js_args.push(&JsValue::from_str(arg));
-        }
-
-        let func: &js_sys::Function = js_fn.unchecked_ref();
-        let result = func.apply(
-            &JsValue::NULL,
-            &js_sys::Array::of2(&js_name, &js_args),
-        );
-
-        match result {
-            Ok(val) if val.is_null() || val.is_undefined() => Ok(None),
-            Ok(val) => Ok(Some(val.as_string().unwrap_or_else(|| format!("{val:?}")))),
-            Err(_) => Ok(None),
-        }
-    }
-}
-
-/// Wire up the JS plugin bridge to the evaluator if a dispatch function is registered.
-fn wire_plugin_bridge(eval: &mut Evaluator<'_>) {
-    let has_dispatch = JS_PLUGIN_DISPATCH.with(|cell| cell.borrow().is_some());
-    if has_dispatch {
-        let dispatch_rc = JS_PLUGIN_DISPATCH.with(|cell| {
-            Rc::new(RefCell::new(cell.borrow().clone().unwrap()))
-        });
-        eval.set_external_function_handler(Box::new(JsPluginBridge { dispatch: dispatch_rc }));
-    }
-}
-
-// ============================================================================
-// Evaluator factory — shared setup with plugin bridge
-// ============================================================================
-
-/// Create a fully-wired Evaluator with the JS plugin bridge attached.
+/// Create an Evaluator for web execution.
 fn create_evaluator<'a>(
     reader: &'a mut WebReader,
     writer: &'a mut WebWriter,
@@ -247,9 +141,6 @@ fn create_evaluator<'a>(
 /// Execute an AWK script with the given input data and return the output.
 ///
 /// Plugin functions (e.g. `greet()`, `sha256()`) are available when a
-/// dispatch function has been registered via `set_plugin_dispatch()`.
-/// The JS host loads WIT plugin WASM modules and routes function calls
-/// through the registered callback.
 ///
 /// # Arguments
 /// * `script` - The AWK program to execute
@@ -279,8 +170,9 @@ pub fn exec_awk(script: &str, input: &str) -> String {
 
 fn exec_awk_inner(script: &str, input: &str) -> Result<String, String> {
     // Preprocess to handle @plugin and @include directives
-    let expanded = wawk_core::preprocessor::preprocess(script, &wawk_core::traits::SandboxIncludeResolver)
-        .map_err(|e| e.to_string())?;
+    let expanded =
+        wawk_core::preprocessor::preprocess(script, &wawk_core::traits::SandboxIncludeResolver)
+            .map_err(|e| e.to_string())?;
     let program = wawk_core::parser::parse(&expanded).map_err(|e| e.to_string())?;
 
     let mut reader = WebReader::new(input);
@@ -289,9 +181,6 @@ fn exec_awk_inner(script: &str, input: &str) -> Result<String, String> {
     let mut cmd = WebCommandExecutor;
 
     let mut eval = create_evaluator(&mut reader, &mut writer, &env, &mut cmd);
-
-    // Wire up JS plugin bridge if a dispatch function is registered
-    wire_plugin_bridge(&mut eval);
 
     eval.execute(&program).map_err(|e| e.to_string())?;
 
@@ -325,8 +214,9 @@ pub fn exec_awk_with_fs(script: &str, input: &str, fs: &str) -> String {
 }
 
 fn exec_awk_with_fs_inner(script: &str, input: &str, fs: &str) -> Result<String, String> {
-    let expanded = wawk_core::preprocessor::preprocess(script, &wawk_core::traits::SandboxIncludeResolver)
-        .map_err(|e| e.to_string())?;
+    let expanded =
+        wawk_core::preprocessor::preprocess(script, &wawk_core::traits::SandboxIncludeResolver)
+            .map_err(|e| e.to_string())?;
     let program = wawk_core::parser::parse(&expanded).map_err(|e| e.to_string())?;
 
     let mut reader = WebReader::new(input);
@@ -336,7 +226,6 @@ fn exec_awk_with_fs_inner(script: &str, input: &str, fs: &str) -> Result<String,
 
     let mut eval = create_evaluator(&mut reader, &mut writer, &env, &mut cmd);
 
-    wire_plugin_bridge(&mut eval);
     eval.set_fs(fs.to_string());
     eval.execute(&program).map_err(|e| e.to_string())?;
 
@@ -375,8 +264,9 @@ fn exec_awk_multi_inner(scripts: &[String], input: &str) -> Result<String, Strin
         .map(|s| s.as_str())
         .collect::<Vec<&str>>()
         .join("\n");
-    let expanded = wawk_core::preprocessor::preprocess(&combined, &wawk_core::traits::SandboxIncludeResolver)
-        .map_err(|e| e.to_string())?;
+    let expanded =
+        wawk_core::preprocessor::preprocess(&combined, &wawk_core::traits::SandboxIncludeResolver)
+            .map_err(|e| e.to_string())?;
     let program = wawk_core::parser::parse(&expanded).map_err(|e| e.to_string())?;
 
     let mut reader = WebReader::new(input);
@@ -386,7 +276,6 @@ fn exec_awk_multi_inner(scripts: &[String], input: &str) -> Result<String, Strin
 
     let mut eval = create_evaluator(&mut reader, &mut writer, &env, &mut cmd);
 
-    wire_plugin_bridge(&mut eval);
     eval.execute(&program).map_err(|e| e.to_string())?;
 
     Ok(writer.output)
@@ -659,8 +548,6 @@ pub fn exec_awk_with_files(
     let mut cmd = WebCommandExecutor;
     let mut eval = Evaluator::new(&mut reader, &mut writer, &env, &mut cmd);
 
-    wire_plugin_bridge(&mut eval);
-
     // Set up ARGV
     let mut argv = vec!["wawk".to_string()];
     let argv_entries = parse_argv_json(argv_json);
@@ -826,13 +713,21 @@ mod tests {
     #[test]
     fn test_exec_awk_invalid_script() {
         let result = exec_awk("BEGIN { print \"unterminated }", "hello");
-        assert!(result.starts_with("Error:"), "Expected error, got: {}", result);
+        assert!(
+            result.starts_with("Error:"),
+            "Expected error, got: {}",
+            result
+        );
     }
 
     #[test]
     fn test_exec_awk_syntax_error() {
         let result = exec_awk("{ if (} }", "");
-        assert!(result.starts_with("Error:"), "Expected error, got: {}", result);
+        assert!(
+            result.starts_with("Error:"),
+            "Expected error, got: {}",
+            result
+        );
     }
 
     #[test]
@@ -1068,10 +963,7 @@ mod tests {
 
     #[test]
     fn test_exec_awk_array_usage() {
-        let result = exec_awk(
-            "BEGIN { a[1]=\"x\"; a[2]=\"y\"; print a[1], a[2] }",
-            "",
-        );
+        let result = exec_awk("BEGIN { a[1]=\"x\"; a[2]=\"y\"; print a[1], a[2] }", "");
         assert_eq!(result, "x y\n");
     }
 

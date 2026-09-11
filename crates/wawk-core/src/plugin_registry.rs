@@ -9,6 +9,7 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::error::AwkResult;
+use crate::namespace_registry::NamespaceRegistry;
 use crate::plugin_meta::PluginMeta;
 use crate::plugin_resolver;
 use crate::traits::{FunctionDispatcher, PluginCapability};
@@ -47,6 +48,8 @@ pub struct PluginRegistry {
     finalized: bool,
     /// Pending registrations (before finalization).
     pending: Vec<PluginEntry>,
+    /// Namespace registry: maps namespace names to plugin indices.
+    pub namespace_registry: NamespaceRegistry,
 }
 
 impl Default for PluginRegistry {
@@ -64,17 +67,14 @@ impl PluginRegistry {
             auto_ctx_fns: Vec::new(),
             finalized: false,
             pending: Vec::new(),
+            namespace_registry: NamespaceRegistry::new(),
         }
     }
 
     /// Register a plugin with its metadata and dispatch callback.
     ///
     /// Must be called before `finalize()`. Panics if already finalized.
-    pub fn register(
-        &mut self,
-        meta: PluginMeta,
-        dispatch: DispatchFn,
-    ) {
+    pub fn register(&mut self, meta: PluginMeta, dispatch: DispatchFn) {
         assert!(!self.finalized, "cannot register after finalize()");
         self.pending.push(PluginEntry { meta, dispatch });
     }
@@ -96,11 +96,7 @@ impl PluginRegistry {
         self.finalized = true;
 
         // Extract metas for dependency resolution
-        let metas: Vec<PluginMeta> = self
-            .pending
-            .iter()
-            .map(|p| p.meta.clone())
-            .collect();
+        let metas: Vec<PluginMeta> = self.pending.iter().map(|p| p.meta.clone()).collect();
 
         // Resolve dependency order
         let resolution = plugin_resolver::resolve(metas);
@@ -127,15 +123,41 @@ impl PluginRegistry {
 
         // ── Init phase: call __init__ on each plugin in dependency order ──
         let mut init_ok: Vec<PluginEntry> = Vec::with_capacity(ordered.len());
+        let mut init_failed: Vec<String> = Vec::new();
         for entry in ordered {
             match (entry.dispatch)("__init__", &[]) {
                 Ok(_) => init_ok.push(entry),
                 Err(e) => {
+                    init_failed.push(entry.meta.name.clone());
                     warnings.push(format!(
                         "plugin '{}' skipped: __init__ failed: {}",
                         entry.meta.name, e
                     ));
                 }
+            }
+        }
+
+        // ── Cascade: recursively remove dependents of failed plugins ──
+        if !init_failed.is_empty() {
+            let mut cascade = true;
+            while cascade {
+                cascade = false;
+                let mut retained = Vec::with_capacity(init_ok.len());
+                for entry in init_ok {
+                    let has_failed_dep =
+                        entry.meta.requires.iter().any(|r| init_failed.contains(r));
+                    if has_failed_dep {
+                        cascade = true;
+                        init_failed.push(entry.meta.name.clone());
+                        warnings.push(format!(
+                            "plugin '{}' skipped: depends on failed plugin",
+                            entry.meta.name
+                        ));
+                    } else {
+                        retained.push(entry);
+                    }
+                }
+                init_ok = retained;
             }
         }
 
@@ -150,9 +172,23 @@ impl PluginRegistry {
             auto_ctx_fns.extend(entry.meta.auto_context_functions.iter().cloned());
         }
 
+        // Build namespace registry from plugin metadata
+        let mut ns_registry = NamespaceRegistry::new();
+        for (idx, entry) in init_ok.iter().enumerate() {
+            if let Some(ref ns) = entry.meta.namespace {
+                if let Err(e) = ns_registry.register(ns, idx) {
+                    warnings.push(format!(
+                        "plugin '{}' namespace conflict: {}",
+                        entry.meta.name, e
+                    ));
+                }
+            }
+        }
+
         self.plugins = init_ok;
         self.fn_index = fn_index;
         self.auto_ctx_fns = auto_ctx_fns;
+        self.namespace_registry = ns_registry;
         self.pending.clear();
 
         warnings
@@ -170,7 +206,10 @@ impl PluginRegistry {
 
     /// Find a plugin by name.
     pub fn find_plugin(&self, name: &str) -> Option<&PluginMeta> {
-        self.plugins.iter().find(|p| p.meta.name == name).map(|p| &p.meta)
+        self.plugins
+            .iter()
+            .find(|p| p.meta.name == name)
+            .map(|p| &p.meta)
     }
 
     /// Find plugins that declare a specific capability.
@@ -191,17 +230,52 @@ impl PluginRegistry {
     pub fn is_empty(&self) -> bool {
         self.plugins.is_empty()
     }
+
+    /// Set the default namespace for unqualified function resolution.
+    pub fn set_default_namespace(&mut self, namespace: &str) {
+        self.namespace_registry.set_default(namespace);
+    }
+
+    /// Clear the default namespace.
+    pub fn clear_default_namespace(&mut self) {
+        self.namespace_registry.clear_default();
+    }
 }
 
 impl PluginCapability for PluginRegistry {
-    fn capability_name(&self) -> &'static str { "function_dispatch" }
+    fn capability_name(&self) -> &'static str {
+        "function_dispatch"
+    }
 }
 
 impl FunctionDispatcher for PluginRegistry {
     fn dispatch(&mut self, name: &str, args: &[String]) -> AwkResult<Option<String>> {
+        // Handle qualified names: "namespace.func" -> route via NamespaceRegistry
+        if let Some(dot_pos) = name.find('.') {
+            let ns = &name[..dot_pos];
+            let func = &name[dot_pos + 1..];
+            if let Some(idx) = self.namespace_registry.resolve_qualified(ns, func) {
+                if let Some(result) = (self.plugins[idx].dispatch)(func, args)? {
+                    return Ok(Some(result));
+                }
+            }
+            // Also try the full qualified name as-is (backward compat)
+            if let Some(&idx) = self.fn_index.get(name) {
+                return (self.plugins[idx].dispatch)(name, args);
+            }
+            return Ok(None);
+        }
+
         // O(1) dispatch via function index
         if let Some(&idx) = self.fn_index.get(name) {
             return (self.plugins[idx].dispatch)(name, args);
+        }
+
+        // Try default namespace resolution
+        if let Some((_, idx)) = self.namespace_registry.resolve(name) {
+            if let Some(result) = (self.plugins[idx].dispatch)(name, args)? {
+                return Ok(Some(result));
+            }
         }
 
         // Fallback: round-robin through plugins that don't declare functions
@@ -219,7 +293,6 @@ impl FunctionDispatcher for PluginRegistry {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,6 +301,7 @@ mod tests {
         PluginMeta {
             name: name.to_string(),
             version: "0.1.0".to_string(),
+            namespace: None,
             requires: vec![],
             description: None,
             functions: functions.iter().map(|s| s.to_string()).collect(),
@@ -240,11 +314,7 @@ mod tests {
         }
     }
 
-    fn make_meta_with_deps(
-        name: &str,
-        functions: Vec<&str>,
-        deps: Vec<&str>,
-    ) -> PluginMeta {
+    fn make_meta_with_deps(name: &str, functions: Vec<&str>, deps: Vec<&str>) -> PluginMeta {
         PluginMeta {
             requires: deps.iter().map(|s| s.to_string()).collect(),
             ..make_meta(name, functions)
@@ -284,7 +354,10 @@ mod tests {
         let p = prefix.to_string();
         Arc::new(move |name, _args| {
             if name == "__init__" {
-                return Err(crate::error::AwkError::RuntimeError(format!("{}: init failed", p)));
+                return Err(crate::error::AwkError::RuntimeError(format!(
+                    "{}: init failed",
+                    p
+                )));
             }
             Ok(None)
         })
@@ -465,7 +538,9 @@ mod tests {
         loader.register(meta, echo_dispatch("s"));
         loader.finalize();
 
-        let result = loader.dispatch("totally_unknown", &["a".to_string()]).unwrap();
+        let result = loader
+            .dispatch("totally_unknown", &["a".to_string()])
+            .unwrap();
         assert_eq!(result, None);
 
         let result = loader.dispatch("", &[]).unwrap();
@@ -492,7 +567,11 @@ mod tests {
         loader.finalize();
 
         let ctx = loader.auto_context_functions();
-        assert!(ctx.is_empty(), "expected empty auto_context_functions, got {:?}", ctx);
+        assert!(
+            ctx.is_empty(),
+            "expected empty auto_context_functions, got {:?}",
+            ctx
+        );
     }
 
     #[test]
@@ -609,10 +688,7 @@ mod tests {
             make_meta_with_deps("wawk-crypto", vec!["encrypt"], vec!["wawk-lic"]),
             crypto_dispatch,
         );
-        loader.register(
-            make_meta("wawk-lic", vec!["activate"]),
-            lic_dispatch,
-        );
+        loader.register(make_meta("wawk-lic", vec!["activate"]), lic_dispatch);
 
         let warnings = loader.finalize();
         assert!(warnings.is_empty());
@@ -636,10 +712,147 @@ mod tests {
         );
 
         let warnings = loader.finalize();
-        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings.len(), 2);
         assert!(warnings[0].contains("wawk-lic"));
-        // wawk-crypto still active (dep resolution passed; only init failed for lic)
-        assert_eq!(loader.len(), 1);
-        assert_eq!(loader.active_plugins()[0].name, "wawk-crypto");
+        assert!(warnings[1].contains("wawk-crypto"));
+        // wawk-crypto cascaded: depends on failed wawk-lic
+        assert_eq!(loader.len(), 0);
+    }
+
+    // ── Namespace-aware dispatch tests ──────────────────────────────
+
+    fn make_meta_with_ns(name: &str, functions: Vec<&str>, ns: &str) -> PluginMeta {
+        PluginMeta {
+            namespace: Some(ns.to_string()),
+            ..make_meta(name, functions)
+        }
+    }
+
+    #[test]
+    fn test_namespace_registry_populated_in_finalize() {
+        let mut loader = PluginRegistry::new();
+        loader.register(
+            make_meta_with_ns("wawk-formula", vec!["sum", "eval"], "formula"),
+            echo_dispatch("formula"),
+        );
+        loader.register(
+            make_meta_with_ns("wawk-crypto", vec!["sha256"], "crypto"),
+            echo_dispatch("crypto"),
+        );
+        loader.finalize();
+
+        let ns_reg = &loader.namespace_registry;
+        assert!(ns_reg.has_namespace("formula"));
+        assert!(ns_reg.has_namespace("crypto"));
+        assert!(!ns_reg.has_namespace("unknown"));
+    }
+
+    #[test]
+    fn test_qualified_dispatch_via_namespace() {
+        let mut loader = PluginRegistry::new();
+        loader.register(
+            make_meta_with_ns("wawk-formula", vec!["sum", "eval"], "formula"),
+            echo_dispatch("formula"),
+        );
+        loader.register(
+            make_meta_with_ns("wawk-crypto", vec!["sha256"], "crypto"),
+            echo_dispatch("crypto"),
+        );
+        loader.finalize();
+
+        // Qualified call: "formula.sum" should route to formula plugin's "sum"
+        let result = loader
+            .dispatch("formula.sum", &["1".to_string(), "2".to_string()])
+            .unwrap();
+        assert_eq!(result, Some("formula:sum(1,2)".to_string()));
+
+        // Qualified call: "crypto.sha256" should route to crypto plugin's "sha256"
+        let result = loader
+            .dispatch("crypto.sha256", &["hello".to_string()])
+            .unwrap();
+        assert_eq!(result, Some("crypto:sha256(hello)".to_string()));
+    }
+
+    #[test]
+    fn test_qualified_dispatch_unknown_namespace() {
+        let mut loader = PluginRegistry::new();
+        loader.register(
+            make_meta_with_ns("wawk-formula", vec!["sum"], "formula"),
+            echo_dispatch("formula"),
+        );
+        loader.finalize();
+
+        let result = loader.dispatch("unknown.func", &[]).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_default_namespace_dispatch() {
+        let mut loader = PluginRegistry::new();
+        loader.register(
+            make_meta_with_ns("wawk-formula", vec!["sum", "eval"], "formula"),
+            echo_dispatch("formula"),
+        );
+        loader.finalize();
+
+        // Set default namespace
+        loader.set_default_namespace("formula");
+
+        // Unqualified call should resolve via default namespace
+        // Note: "sum" is in fn_index, so it dispatches directly.
+        // The default namespace fallback is for functions NOT in fn_index
+        // but that the default namespace plugin can handle via round-robin.
+        let result = loader.dispatch("sum", &[]).unwrap();
+        assert_eq!(result, Some("formula:sum".to_string()));
+    }
+
+    #[test]
+    fn test_clear_default_namespace() {
+        let mut loader = PluginRegistry::new();
+        loader.register(
+            make_meta_with_ns("wawk-formula", vec!["sum"], "formula"),
+            echo_dispatch("formula"),
+        );
+        loader.finalize();
+
+        loader.set_default_namespace("formula");
+        loader.clear_default_namespace();
+
+        let ns_reg = &loader.namespace_registry;
+        assert_eq!(ns_reg.default_namespace(), None);
+    }
+
+    #[test]
+    fn test_namespace_collision_warning() {
+        let mut loader = PluginRegistry::new();
+        loader.register(
+            make_meta_with_ns("plugin-a", vec!["fn_a"], "shared_ns"),
+            echo_dispatch("A"),
+        );
+        loader.register(
+            make_meta_with_ns("plugin-b", vec!["fn_b"], "shared_ns"),
+            echo_dispatch("B"),
+        );
+
+        let warnings = loader.finalize();
+        assert!(
+            warnings.iter().any(|w| w.contains("namespace conflict")),
+            "expected namespace conflict warning, got: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn test_unqualified_dispatch_still_works_with_namespaces() {
+        let mut loader = PluginRegistry::new();
+        loader.register(
+            make_meta_with_ns("wawk-formula", vec!["sum", "eval"], "formula"),
+            echo_dispatch("formula"),
+        );
+        loader.finalize();
+
+        // Unqualified call should still work via fn_index
+        let result = loader.dispatch("sum", &["1".to_string()]).unwrap();
+        assert_eq!(result, Some("formula:sum(1)".to_string()));
     }
 }

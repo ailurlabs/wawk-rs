@@ -21,24 +21,23 @@
 pub mod ast;
 pub mod error;
 pub mod eval;
+pub mod format_registry;
 pub mod lexer;
 pub mod parser;
 pub mod preprocessor;
 pub mod traits;
 pub mod types;
-pub mod format_registry;
 // ── Plugin subsystem ──────────────────────────────────────────────────
+pub mod namespace_registry;
 pub mod plugin_meta;
-pub mod plugin_resolver;
 pub mod plugin_registry;
-
-
+pub mod plugin_resolver;
 
 use error::AwkResult;
 use eval::Evaluator;
 use parser::parse;
 use traits::{
-    AwkCommandExecutor, AwkEnvironment, FunctionDispatcher, AwkReader, AwkWriter, IncludeResolver,
+    AwkCommandExecutor, AwkEnvironment, AwkReader, AwkWriter, FunctionDispatcher, IncludeResolver,
 };
 
 /// High-level AWK engine that encapsulates parsing and evaluation.

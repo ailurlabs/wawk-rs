@@ -23,7 +23,7 @@ impl Number {
             Number::Float(n) => *n,
         }
     }
-    
+
     pub fn is_integer(&self) -> bool {
         matches!(self, Number::Integer(_))
     }
@@ -42,11 +42,10 @@ impl From<f64> for Number {
 }
 
 /// Generic property tree node for hierarchical data
-/// 
+///
 /// This is the core data model for all format handlers (JSON, XML, YAML, TOML).
 /// It preserves type information and format-specific metadata for lossless round-tripping.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub enum PropertyTree {
     #[default]
     Null,
@@ -54,7 +53,7 @@ pub enum PropertyTree {
     Number(Number),
     String(String),
     Array(Vec<PropertyTree>),
-    Object(Vec<(String, PropertyTree)>),  // Ordered, preserves insertion order
+    Object(Vec<(String, PropertyTree)>), // Ordered, preserves insertion order
 }
 
 impl PropertyTree {
@@ -62,47 +61,45 @@ impl PropertyTree {
     pub fn null() -> Self {
         Self::Null
     }
-    
+
     /// Create a boolean value
     pub fn bool(b: bool) -> Self {
         Self::Bool(b)
     }
-    
+
     /// Create an integer number
     pub fn integer(n: i64) -> Self {
         Self::Number(Number::Integer(n))
     }
-    
+
     /// Create a float number
     pub fn float(n: f64) -> Self {
         Self::Number(Number::Float(n))
     }
-    
+
     /// Create a string value
     pub fn string(s: impl Into<String>) -> Self {
         Self::String(s.into())
     }
-    
+
     /// Create an array value
     pub fn array(items: Vec<PropertyTree>) -> Self {
         Self::Array(items)
     }
-    
+
     /// Create an object value
     pub fn object(fields: Vec<(String, PropertyTree)>) -> Self {
         Self::Object(fields)
     }
-    
+
     /// Get a field value by name (for Object nodes)
     pub fn get_field(&self, field: &str) -> Option<&PropertyTree> {
         match self {
-            PropertyTree::Object(pairs) => {
-                pairs.iter().find(|(k, _)| k == field).map(|(_, v)| v)
-            }
+            PropertyTree::Object(pairs) => pairs.iter().find(|(k, _)| k == field).map(|(_, v)| v),
             _ => None,
         }
     }
-    
+
     /// Get a field value by index (for Array nodes)
     pub fn get_index(&self, index: usize) -> Option<&PropertyTree> {
         match self {
@@ -110,32 +107,32 @@ impl PropertyTree {
             _ => None,
         }
     }
-    
+
     /// Check if this is an object
     pub fn is_object(&self) -> bool {
         matches!(self, PropertyTree::Object(_))
     }
-    
+
     /// Check if this is an array
     pub fn is_array(&self) -> bool {
         matches!(self, PropertyTree::Array(_))
     }
-    
+
     /// Check if this is a string
     pub fn is_string(&self) -> bool {
         matches!(self, PropertyTree::String(_))
     }
-    
+
     /// Check if this is a number
     pub fn is_number(&self) -> bool {
         matches!(self, PropertyTree::Number(_))
     }
-    
+
     /// Check if this is null
     pub fn is_null(&self) -> bool {
         matches!(self, PropertyTree::Null)
     }
-    
+
     /// Convert to string representation
     pub fn as_str(&self) -> Cow<'_, str> {
         match self {
@@ -155,7 +152,7 @@ impl PropertyTree {
             _ => Cow::Borrowed(""),
         }
     }
-    
+
     /// Convert to f64
     pub fn as_f64(&self) -> f64 {
         match self {
@@ -166,7 +163,7 @@ impl PropertyTree {
             _ => 0.0,
         }
     }
-    
+
     /// Get the number of children (object fields or array elements)
     pub fn len(&self) -> usize {
         match self {
@@ -175,7 +172,7 @@ impl PropertyTree {
             _ => 0,
         }
     }
-    
+
     /// Check if this is empty
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -193,18 +190,22 @@ impl PropertyTree {
                     depth += 1;
                     if depth > MAX_PT_NESTING_DEPTH {
                         return Err(crate::error::AwkError::RuntimeError(format!(
-                            "PropertyTree nesting depth exceeds limit ({} max)", MAX_PT_NESTING_DEPTH
+                            "PropertyTree nesting depth exceeds limit ({} max)",
+                            MAX_PT_NESTING_DEPTH
                         )));
                     }
-                    if depth > max_depth { max_depth = depth; }
+                    if depth > max_depth {
+                        max_depth = depth;
+                    }
                 }
-                b'}' | b']' => { depth = depth.saturating_sub(1); }
+                b'}' | b']' => {
+                    depth = depth.saturating_sub(1);
+                }
                 _ => {}
             }
         }
-        let val: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
-            crate::error::AwkError::RuntimeError(format!("Invalid JSON: {}", e))
-        })?;
+        let val: serde_json::Value = serde_json::from_str(json_str)
+            .map_err(|e| crate::error::AwkError::RuntimeError(format!("Invalid JSON: {}", e)))?;
         json_value_to_pt(&val, 0)
     }
 
@@ -216,10 +217,14 @@ impl PropertyTree {
 }
 
 /// Convert serde_json::Value to PropertyTree with security limits.
-fn json_value_to_pt(val: &serde_json::Value, depth: usize) -> crate::error::AwkResult<PropertyTree> {
+fn json_value_to_pt(
+    val: &serde_json::Value,
+    depth: usize,
+) -> crate::error::AwkResult<PropertyTree> {
     if depth > MAX_PT_NESTING_DEPTH {
         return Err(crate::error::AwkError::RuntimeError(format!(
-            "PropertyTree nesting depth exceeds limit ({} max)", MAX_PT_NESTING_DEPTH
+            "PropertyTree nesting depth exceeds limit ({} max)",
+            MAX_PT_NESTING_DEPTH
         )));
     }
     Ok(match val {
@@ -238,7 +243,9 @@ fn json_value_to_pt(val: &serde_json::Value, depth: usize) -> crate::error::AwkR
         serde_json::Value::Array(arr) => {
             if arr.len() > MAX_PT_ARRAY_LENGTH {
                 return Err(crate::error::AwkError::RuntimeError(format!(
-                    "PropertyTree array length exceeds limit ({} max, got {})", MAX_PT_ARRAY_LENGTH, arr.len()
+                    "PropertyTree array length exceeds limit ({} max, got {})",
+                    MAX_PT_ARRAY_LENGTH,
+                    arr.len()
                 )));
             }
             let mut items = Vec::with_capacity(arr.len());
@@ -250,14 +257,18 @@ fn json_value_to_pt(val: &serde_json::Value, depth: usize) -> crate::error::AwkR
         serde_json::Value::Object(obj) => {
             if obj.len() > MAX_PT_OBJECT_KEYS {
                 return Err(crate::error::AwkError::RuntimeError(format!(
-                    "PropertyTree object key count exceeds limit ({} max, got {})", MAX_PT_OBJECT_KEYS, obj.len()
+                    "PropertyTree object key count exceeds limit ({} max, got {})",
+                    MAX_PT_OBJECT_KEYS,
+                    obj.len()
                 )));
             }
             let mut pairs = Vec::with_capacity(obj.len());
             for (k, v) in obj {
                 if k.len() > MAX_PT_KEY_LENGTH {
                     return Err(crate::error::AwkError::RuntimeError(format!(
-                        "PropertyTree key length exceeds limit ({} max, got {})", MAX_PT_KEY_LENGTH, k.len()
+                        "PropertyTree key length exceeds limit ({} max, got {})",
+                        MAX_PT_KEY_LENGTH,
+                        k.len()
                     )));
                 }
                 pairs.push((k.clone(), json_value_to_pt(v, depth + 1)?));
@@ -273,11 +284,9 @@ fn pt_to_json_value(pt: &PropertyTree) -> serde_json::Value {
         PropertyTree::Null => serde_json::Value::Null,
         PropertyTree::Bool(b) => serde_json::Value::Bool(*b),
         PropertyTree::Number(Number::Integer(i)) => serde_json::Value::Number((*i).into()),
-        PropertyTree::Number(Number::Float(f)) => {
-            serde_json::Number::from_f64(*f)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null)
-        }
+        PropertyTree::Number(Number::Float(f)) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
         PropertyTree::String(s) => serde_json::Value::String(s.clone()),
         PropertyTree::Array(items) => {
             serde_json::Value::Array(items.iter().map(pt_to_json_value).collect())
@@ -292,7 +301,6 @@ fn pt_to_json_value(pt: &PropertyTree) -> serde_json::Value {
     }
 }
 
-
 impl PartialEq for PropertyTree {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -306,7 +314,6 @@ impl PartialEq for PropertyTree {
         }
     }
 }
-
 
 /// Registry for plugin-provided types.
 /// Plugins register type tags (e.g., "@date", "@grid") and the engine
@@ -348,7 +355,6 @@ impl Default for PluginTypeRegistry {
         Self::new()
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -407,7 +413,7 @@ mod tests {
         assert!(tree.is_array());
         assert_eq!(tree.len(), 3);
         assert!(!tree.is_empty());
-        
+
         assert_eq!(tree.get_index(0).unwrap().as_f64(), 1.0);
         assert_eq!(tree.get_index(1).unwrap().as_f64(), 2.0);
         assert_eq!(tree.get_index(2).unwrap().as_f64(), 3.0);
@@ -422,31 +428,36 @@ mod tests {
         ]);
         assert!(tree.is_object());
         assert_eq!(tree.len(), 2);
-        
+
         let name = tree.get_field("name").unwrap();
         assert_eq!(name.as_str(), "Alice");
-        
+
         let age = tree.get_field("age").unwrap();
         assert_eq!(age.as_f64(), 30.0);
-        
+
         assert!(tree.get_field("missing").is_none());
     }
 
     #[test]
     fn test_property_tree_nested() {
-        let tree = PropertyTree::object(vec![
-            ("user".to_string(), PropertyTree::object(vec![
+        let tree = PropertyTree::object(vec![(
+            "user".to_string(),
+            PropertyTree::object(vec![
                 ("name".to_string(), PropertyTree::string("Bob")),
-                ("address".to_string(), PropertyTree::object(vec![
-                    ("city".to_string(), PropertyTree::string("Berlin")),
-                ])),
-            ])),
-        ]);
-        
+                (
+                    "address".to_string(),
+                    PropertyTree::object(vec![(
+                        "city".to_string(),
+                        PropertyTree::string("Berlin"),
+                    )]),
+                ),
+            ]),
+        )]);
+
         let user = tree.get_field("user").unwrap();
         let name = user.get_field("name").unwrap();
         assert_eq!(name.as_str(), "Bob");
-        
+
         let address = user.get_field("address").unwrap();
         let city = address.get_field("city").unwrap();
         assert_eq!(city.as_str(), "Berlin");
@@ -457,7 +468,7 @@ mod tests {
         let a = PropertyTree::integer(42);
         let b = PropertyTree::integer(42);
         let c = PropertyTree::integer(43);
-        
+
         assert_eq!(a, b);
         assert_ne!(a, c);
     }
@@ -473,7 +484,7 @@ mod tests {
         let int_num = Number::from(42i64);
         assert!(int_num.is_integer());
         assert_eq!(int_num.as_f64(), 42.0);
-        
+
         let float_num = Number::from(std::f64::consts::PI);
         assert!(!float_num.is_integer());
         assert!((float_num.as_f64() - std::f64::consts::PI).abs() < f64::EPSILON);

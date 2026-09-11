@@ -149,7 +149,9 @@ impl Parser {
             if let Token::Regex(re) = self.lexer.advance() {
                 Pattern::Regex(re)
             } else {
-                return Err(AwkError::ParseError("unexpected token after regex peek".to_string()));
+                return Err(AwkError::ParseError(
+                    "unexpected token after regex peek".to_string(),
+                ));
             }
         } else {
             let expr = self.parse_expression()?;
@@ -164,7 +166,9 @@ impl Parser {
                 if let Token::Regex(re) = self.lexer.advance() {
                     Pattern::Regex(re)
                 } else {
-                    return Err(AwkError::ParseError("unexpected token after regex peek".to_string()));
+                    return Err(AwkError::ParseError(
+                        "unexpected token after regex peek".to_string(),
+                    ));
                 }
             } else {
                 let expr = self.parse_expression()?;
@@ -259,7 +263,11 @@ impl Parser {
                         Token::StarAssign => BinOp::Mul,
                         Token::SlashAssign => BinOp::Div,
                         Token::PercentAssign => BinOp::Mod,
-                        _ => return Err(AwkError::ParseError("unexpected compound assignment operator".to_string())),
+                        _ => {
+                            return Err(AwkError::ParseError(
+                                "unexpected compound assignment operator".to_string(),
+                            ))
+                        }
                     };
                     self.lexer.advance();
                     let value = self.parse_expression()?;
@@ -645,7 +653,8 @@ impl Parser {
         if self.depth > MAX_PARSE_DEPTH {
             self.depth -= 1;
             return Err(AwkError::ParseError(format!(
-                "expression nesting too deep (max {} levels)", MAX_PARSE_DEPTH
+                "expression nesting too deep (max {} levels)",
+                MAX_PARSE_DEPTH
             )));
         }
         let result = self.parse_ternary();
@@ -891,18 +900,24 @@ impl Parser {
                     self.lexer.advance(); // consume .
                     if let Token::Ident(field) = self.lexer.peek().clone() {
                         self.lexer.advance(); // consume field name
-                        // $.field => DotAccess(Record, field)
-                        // Continue with postfix chaining for $.field.subfield...
+                                              // $.field => DotAccess(Record, field)
+                                              // Continue with postfix chaining for $.field.subfield...
                         let mut expr = Expr::DotAccess(Box::new(Expr::Record), field);
                         loop {
                             match self.lexer.peek() {
                                 Token::Dot => {
                                     self.lexer.advance();
                                     let f = match self.lexer.peek().clone() {
-                                        Token::Ident(name) => { self.lexer.advance(); name }
-                                        other => return Err(AwkError::ParseError(format!(
-                                            "Expected field name after '.', got {:?}", other
-                                        ))),
+                                        Token::Ident(name) => {
+                                            self.lexer.advance();
+                                            name
+                                        }
+                                        other => {
+                                            return Err(AwkError::ParseError(format!(
+                                                "Expected field name after '.', got {:?}",
+                                                other
+                                            )))
+                                        }
                                     };
                                     expr = Expr::DotAccess(Box::new(expr), f);
                                 }
@@ -942,10 +957,16 @@ impl Parser {
                         Token::Dot => {
                             self.lexer.advance();
                             let f = match self.lexer.peek().clone() {
-                                Token::Ident(name) => { self.lexer.advance(); name }
-                                other => return Err(AwkError::ParseError(format!(
-                                    "Expected field name after '.', got {:?}", other
-                                ))),
+                                Token::Ident(name) => {
+                                    self.lexer.advance();
+                                    name
+                                }
+                                other => {
+                                    return Err(AwkError::ParseError(format!(
+                                        "Expected field name after '.', got {:?}",
+                                        other
+                                    )))
+                                }
                             };
                             result = Expr::DotAccess(Box::new(result), f);
                         }
@@ -1031,6 +1052,34 @@ impl Parser {
                             )));
                         }
                     };
+                    // Check for namespace.func(args) pattern
+                    if matches!(self.lexer.peek(), Token::LParen) {
+                        if let Expr::Var(ref ns_name) = expr {
+                            let ns = ns_name.clone();
+                            self.lexer.advance(); // consume (
+                            let mut args = Vec::new();
+                            if !matches!(self.lexer.peek(), Token::RParen) {
+                                args.push(self.parse_expression()?);
+                                while matches!(self.lexer.peek(), Token::Comma) {
+                                    self.lexer.advance();
+                                    args.push(self.parse_expression()?);
+                                }
+                            }
+                            self.lexer.expect(&Token::RParen)?;
+                            if args.len() > MAX_FUNC_ARGS {
+                                return Err(AwkError::ParseError(format!(
+                                    "too many function arguments ({} max, got {})",
+                                    MAX_FUNC_ARGS,
+                                    args.len()
+                                )));
+                            }
+                            return Ok(Expr::QualifiedFuncCall {
+                                namespace: ns,
+                                function: field,
+                                args,
+                            });
+                        }
+                    }
                     expr = Expr::DotAccess(Box::new(expr), field);
                 }
                 Token::LBracket => {
@@ -1109,7 +1158,9 @@ impl Parser {
                     self.lexer.expect(&Token::RParen)?;
                     if args.len() > MAX_FUNC_ARGS {
                         return Err(AwkError::ParseError(format!(
-                            "too many function arguments ({} max, got {})", MAX_FUNC_ARGS, args.len()
+                            "too many function arguments ({} max, got {})",
+                            MAX_FUNC_ARGS,
+                            args.len()
                         )));
                     }
                     return Ok(Expr::FuncCall(name, args));
@@ -1268,7 +1319,9 @@ impl Parser {
         self.lexer.expect(&Token::RBrace)?;
         if pairs.len() > MAX_LITERAL_SIZE {
             return Err(AwkError::ParseError(format!(
-                "too many object literal fields ({} max, got {})", MAX_LITERAL_SIZE, pairs.len()
+                "too many object literal fields ({} max, got {})",
+                MAX_LITERAL_SIZE,
+                pairs.len()
             )));
         }
         Ok(Expr::ObjectLit(pairs))
@@ -1295,7 +1348,9 @@ impl Parser {
         self.lexer.expect(&Token::RBracket)?;
         if elements.len() > MAX_LITERAL_SIZE {
             return Err(AwkError::ParseError(format!(
-                "too many array literal elements ({} max, got {})", MAX_LITERAL_SIZE, elements.len()
+                "too many array literal elements ({} max, got {})",
+                MAX_LITERAL_SIZE,
+                elements.len()
             )));
         }
         Ok(Expr::ArrayLit(elements))
@@ -1380,35 +1435,46 @@ mod tests {
         // Spawn a thread with a larger stack so we can test the parser's
         // recursive descent without hitting OS stack limits.
         let handle = std::thread::Builder::new()
-            .stack_size(16 * 1024 * 1024) // 16MB stack
+            .stack_size(64 * 1024 * 1024) // 64MB stack
             .spawn(|| {
                 // Test that moderately nested expressions parse correctly
                 let depth = 50;
                 let mut expr = String::new();
-                for _ in 0..depth { expr.push('('); }
+                for _ in 0..depth {
+                    expr.push('(');
+                }
                 expr.push('1');
-                for _ in 0..depth { expr.push(')'); }
+                for _ in 0..depth {
+                    expr.push(')');
+                }
                 let script = format!("BEGIN {{ x = {} }}", expr);
                 let result = crate::parser::parse(&script);
-                assert!(result.is_ok(), "depth-50 nested expression should parse: {:?}", result.err());
+                assert!(
+                    result.is_ok(),
+                    "depth-50 nested expression should parse: {:?}",
+                    result.err()
+                );
             })
             .unwrap();
         handle.join().unwrap();
     }
-
 
     #[test]
     fn test_parse_depth_limit() {
         // Build nested expression exceeding MAX_PARSE_DEPTH (512)
         // Use a thread with larger stack since recursive descent is stack-heavy
         let handle = std::thread::Builder::new()
-            .stack_size(16 * 1024 * 1024)
+            .stack_size(64 * 1024 * 1024)
             .spawn(|| {
                 let depth = 600;
                 let mut expr = String::new();
-                for _ in 0..depth { expr.push('('); }
+                for _ in 0..depth {
+                    expr.push('(');
+                }
                 expr.push('1');
-                for _ in 0..depth { expr.push(')'); }
+                for _ in 0..depth {
+                    expr.push(')');
+                }
                 let script = format!("BEGIN {{ x = {} }}", expr);
                 let result = crate::parser::parse(&script);
                 assert!(result.is_err(), "should reject deeply nested expression");
@@ -1424,7 +1490,9 @@ mod tests {
         // Build function call with > 1024 args
         let mut args = String::new();
         for i in 0..1025 {
-            if i > 0 { args.push(','); }
+            if i > 0 {
+                args.push(',');
+            }
             args.push_str(&i.to_string());
         }
         let script = format!("BEGIN {{ foo({}) }}", args);
@@ -1433,7 +1501,6 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(err.contains("too many function arguments"), "got: {}", err);
     }
-
 
     // --- Missing statement/expression parser tests ---
 
@@ -1462,18 +1529,17 @@ mod tests {
 
     #[test]
     fn test_parse_break_continue() {
-        let program = parse("BEGIN { for (i=0;i<10;i++) { if (i==5) break; if (i==3) continue } }").unwrap();
+        let program =
+            parse("BEGIN { for (i=0;i<10;i++) { if (i==5) break; if (i==3) continue } }").unwrap();
         let action = program.rules[0].action.as_ref().unwrap();
         // The for loop body should be a Block containing if statements with break/continue
         match &action.statements[0] {
-            Statement::For(_, _, _, body) => {
-                match body.as_ref() {
-                    Statement::Block(stmts) => {
-                        assert!(stmts.len() >= 2, "should have at least 2 if statements");
-                    }
-                    other => panic!("Expected Block in for body, got {:?}", other),
+            Statement::For(_, _, _, body) => match body.as_ref() {
+                Statement::Block(stmts) => {
+                    assert!(stmts.len() >= 2, "should have at least 2 if statements");
                 }
-            }
+                other => panic!("Expected Block in for body, got {:?}", other),
+            },
             other => panic!("Expected For, got {:?}", other),
         }
     }
@@ -1501,7 +1567,10 @@ mod tests {
     fn test_parse_range_pattern() {
         let program = parse("/start/,/end/ { print }").unwrap();
         assert_eq!(program.rules.len(), 1);
-        assert!(matches!(&program.rules[0].pattern, Some(Pattern::Range(_, _))));
+        assert!(matches!(
+            &program.rules[0].pattern,
+            Some(Pattern::Range(_, _))
+        ));
     }
 
     #[test]
@@ -1578,7 +1647,11 @@ mod tests {
         // Print redirect uses > which may be lexed as Gt token
         // Test that it either parses as PrintRedirect or as a valid program
         let result = parse(r#"{ print "hello" > "file.txt" }"#);
-        assert!(result.is_ok(), "print redirect should parse: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "print redirect should parse: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -1589,10 +1662,68 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_qualified_func_call() {
+        let program = parse("BEGIN { x = formula.sum(1, 2, 3) }").unwrap();
+        let action = program.rules[0].action.as_ref().unwrap();
+        match &action.statements[0] {
+            Statement::Assign(
+                name,
+                Expr::QualifiedFuncCall {
+                    namespace,
+                    function,
+                    args,
+                },
+            ) => {
+                assert_eq!(name, "x");
+                assert_eq!(namespace, "formula");
+                assert_eq!(function, "sum");
+                assert_eq!(args.len(), 3);
+            }
+            other => panic!("Expected Assign with QualifiedFuncCall, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_qualified_func_no_args() {
+        let program = parse("BEGIN { x = crypto.random() }").unwrap();
+        let action = program.rules[0].action.as_ref().unwrap();
+        match &action.statements[0] {
+            Statement::Assign(
+                _,
+                Expr::QualifiedFuncCall {
+                    namespace,
+                    function,
+                    args,
+                },
+            ) => {
+                assert_eq!(namespace, "crypto");
+                assert_eq!(function, "random");
+                assert_eq!(args.len(), 0);
+            }
+            other => panic!("Expected QualifiedFuncCall, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_dot_access_not_qualified() {
+        // obj.field without parens should still be DotAccess, not QualifiedFuncCall
+        let program = parse("BEGIN { x = obj.field }").unwrap();
+        let action = program.rules[0].action.as_ref().unwrap();
+        match &action.statements[0] {
+            Statement::Assign(_, Expr::DotAccess(_, field)) => {
+                assert_eq!(field, "field");
+            }
+            other => panic!("Expected DotAccess, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_parse_syntax_error() {
         // Missing closing brace should produce an error
         let result = parse("BEGIN { print 42");
-        assert!(result.is_err(), "missing closing brace should be a syntax error");
+        assert!(
+            result.is_err(),
+            "missing closing brace should be a syntax error"
+        );
     }
-
 }

@@ -1,7 +1,7 @@
 //! Security limits and audit logging for AWK execution.
 
-use crate::error::{AwkResult, AwkError};
 use super::AuditEvent;
+use crate::error::{AwkError, AwkResult};
 
 pub const MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024; // 64 MB
 pub const MAX_CALL_DEPTH: usize = 256;
@@ -11,7 +11,6 @@ pub const MAX_REGEX_PATTERN_LEN: usize = 4096;
 pub const MAX_ARRAY_SIZE: usize = 1_000_000;
 pub const MAX_OPEN_FILES: usize = 256;
 pub const MAX_AUDIT_LOG_ENTRIES: usize = 1024;
-
 
 pub struct SecurityManager {
     pub output_bytes: usize,
@@ -45,7 +44,7 @@ impl SecurityManager {
         }
 
         self.output_bytes = self.output_bytes.saturating_add(additional_bytes);
-        
+
         if self.output_bytes > MAX_OUTPUT_BYTES {
             self.record_audit(AuditEvent::LimitViolation {
                 limit_name: "MAX_OUTPUT_BYTES".to_string(),
@@ -67,7 +66,7 @@ impl SecurityManager {
         }
 
         self.call_depth += 1;
-        
+
         if self.call_depth > MAX_CALL_DEPTH {
             self.record_audit(AuditEvent::LimitViolation {
                 limit_name: "MAX_CALL_DEPTH".to_string(),
@@ -95,7 +94,7 @@ impl SecurityManager {
         }
 
         self.expr_depth += 1;
-        
+
         if self.expr_depth > MAX_EXPR_DEPTH {
             self.record_audit(AuditEvent::LimitViolation {
                 limit_name: "MAX_EXPR_DEPTH".to_string(),
@@ -141,8 +140,7 @@ impl SecurityManager {
         if size > MAX_ARRAY_SIZE {
             return Err(AwkError::RuntimeError(format!(
                 "Array size exceeded ({} > {})",
-                size,
-                MAX_ARRAY_SIZE
+                size, MAX_ARRAY_SIZE
             )));
         }
 

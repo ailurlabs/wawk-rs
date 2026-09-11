@@ -3,9 +3,9 @@
 //! The `FormatRegistry` holds a collection of `FormatDispatcher` implementations
 //! and provides format detection and serialization capabilities.
 
+use crate::error::AwkResult;
 use crate::traits::FormatDispatcher;
 use crate::types::PropertyTree;
-use crate::error::AwkResult;
 
 /// Registry that manages format plugins for multi-format input/output.
 ///
@@ -18,7 +18,9 @@ pub struct FormatRegistry {
 impl FormatRegistry {
     /// Create an empty format registry.
     pub fn new() -> Self {
-        Self { plugins: Vec::new() }
+        Self {
+            plugins: Vec::new(),
+        }
     }
 
     /// Register a format plugin. Plugins are re-sorted by priority after insertion.
@@ -35,7 +37,11 @@ impl FormatRegistry {
     pub fn detect_and_parse(&self, input: &str) -> Option<AwkResult<(PropertyTree, String)>> {
         for plugin in &self.plugins {
             if plugin.detect(input) {
-                return Some(plugin.parse(input).map(|pt| (pt, plugin.name().to_string())));
+                return Some(
+                    plugin
+                        .parse(input)
+                        .map(|pt| (pt, plugin.name().to_string())),
+                );
             }
         }
         None

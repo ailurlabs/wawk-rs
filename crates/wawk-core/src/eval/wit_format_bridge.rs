@@ -31,8 +31,16 @@ impl WitFormatDispatcher {
     /// * `name` - The format name (e.g., "xml", "yaml")
     /// * `handler` - A FunctionDispatcher that handles `__detect__`, `__parse__`, `__serialize__`
     /// * `priority` - Detection priority (lower = higher priority)
-    pub fn new(name: String, handler: Box<dyn FunctionDispatcher + Send + Sync>, priority: u32) -> Self {
-        Self { name, handler: Mutex::new(handler), priority }
+    pub fn new(
+        name: String,
+        handler: Box<dyn FunctionDispatcher + Send + Sync>,
+        priority: u32,
+    ) -> Self {
+        Self {
+            name,
+            handler: Mutex::new(handler),
+            priority,
+        }
     }
 }
 

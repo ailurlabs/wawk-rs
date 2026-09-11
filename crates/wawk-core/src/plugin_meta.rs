@@ -21,6 +21,11 @@ pub struct PluginMeta {
     /// Plugin version (semver). Used for compatibility checks.
     pub version: String,
 
+    /// Namespace for function scoping. When set, plugin functions can be
+    /// called as namespace.func() or just func() when namespace is default.
+    #[serde(default)]
+    pub namespace: Option<String>,
+
     /// Dependencies on other plugins. The host resolves these generically.
     #[serde(default)]
     pub requires: Vec<String>,
@@ -30,7 +35,6 @@ pub struct PluginMeta {
     pub description: Option<String>,
 
     // -- Expanded fields (all optional with serde defaults) --
-
     /// List of function names this plugin exposes.
     /// Enables auto-discovery: host builds function->plugin index for O(1) dispatch.
     #[serde(default)]
@@ -137,6 +141,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_meta_with_namespace() {
+        let json = r#"{"name": "test-formula", "version": "0.2.0", "namespace": "formula"}"#;
+        match parse_meta(json) {
+            MetaResult::Ok(m) => {
+                assert_eq!(m.namespace.as_deref(), Some("formula"));
+            }
+            other => panic!("expected Ok, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_meta_without_namespace() {
+        let json = r#"{"name": "test-hello", "version": "0.1.0"}"#;
+        match parse_meta(json) {
+            MetaResult::Ok(m) => {
+                assert!(m.namespace.is_none());
+            }
+            other => panic!("expected Ok, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn parse_missing_name() {
         let json = r#"{"version": "0.1.0"}"#;
         assert!(matches!(parse_meta(json), MetaResult::ParseError(_)));
@@ -155,7 +181,8 @@ mod tests {
 
     #[test]
     fn parse_multiple_requires() {
-        let json = r#"{"name": "test-geo", "version": "1.0.0", "requires": ["test-auth", "test-cache"]}"#;
+        let json =
+            r#"{"name": "test-geo", "version": "1.0.0", "requires": ["test-auth", "test-cache"]}"#;
         match parse_meta(json) {
             MetaResult::Ok(m) => assert_eq!(m.requires, vec!["test-auth", "test-cache"]),
             other => panic!("expected Ok, got {:?}", other),

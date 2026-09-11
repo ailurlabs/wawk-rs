@@ -2,9 +2,9 @@
 //!
 //! Handles scope stack operations, variable access, and array management.
 
-use rustc_hash::FxHashMap;
 use super::Value;
 use crate::error::AwkResult;
+use rustc_hash::FxHashMap;
 
 pub struct ScopeManager {
     pub scope_stack: Vec<FxHashMap<String, Value>>,
@@ -61,7 +61,10 @@ impl ScopeManager {
     }
 
     pub fn array_contains(&self, arr_name: &str, key: &str) -> bool {
-        self.arrays.get(arr_name).map(|arr| arr.contains_key(key)).unwrap_or(false)
+        self.arrays
+            .get(arr_name)
+            .map(|arr| arr.contains_key(key))
+            .unwrap_or(false)
     }
 
     pub fn delete_array(&mut self, arr_name: &str) {
@@ -75,7 +78,10 @@ impl ScopeManager {
     }
 
     pub fn array_keys(&self, arr_name: &str) -> Vec<String> {
-        self.arrays.get(arr_name).map(|arr| arr.keys().cloned().collect()).unwrap_or_default()
+        self.arrays
+            .get(arr_name)
+            .map(|arr| arr.keys().cloned().collect())
+            .unwrap_or_default()
     }
 }
 
@@ -92,16 +98,16 @@ mod tests {
     #[test]
     fn test_scope_stack() {
         let mut mgr = ScopeManager::new();
-        
+
         // Set in global scope
         mgr.set_var("x".to_string(), Value::Number(42.0));
         assert_eq!(mgr.get_variable("x").as_number(), 42.0);
-        
+
         // Push new scope
         mgr.push_scope();
         mgr.set_var("x".to_string(), Value::Number(100.0));
         assert_eq!(mgr.get_variable("x").as_number(), 100.0);
-        
+
         // Pop scope
         mgr.pop_scope();
         assert_eq!(mgr.get_variable("x").as_number(), 42.0);
@@ -110,17 +116,19 @@ mod tests {
     #[test]
     fn test_array_operations() {
         let mut mgr = ScopeManager::new();
-        
-        mgr.array_insert("arr", "key1".to_string(), Value::Number(1.0)).unwrap();
-        mgr.array_insert("arr", "key2".to_string(), Value::Number(2.0)).unwrap();
-        
+
+        mgr.array_insert("arr", "key1".to_string(), Value::Number(1.0))
+            .unwrap();
+        mgr.array_insert("arr", "key2".to_string(), Value::Number(2.0))
+            .unwrap();
+
         assert_eq!(mgr.array_len("arr"), 2);
         assert!(mgr.array_contains("arr", "key1"));
         assert!(!mgr.array_contains("arr", "key3"));
-        
+
         mgr.delete_array_element("arr", "key1");
         assert_eq!(mgr.array_len("arr"), 1);
-        
+
         mgr.delete_array("arr");
         assert_eq!(mgr.array_len("arr"), 0);
     }

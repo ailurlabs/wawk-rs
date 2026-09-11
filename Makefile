@@ -22,13 +22,9 @@ fmt:
 clippy:
 	cargo clippy --workspace --all-targets -- -D warnings
 
-# Build wawk-wasi for WASI target
+# Build wawk-wasi as WASM component (composable with WIT plugins via wac plug)
 wasi:
-	cargo build -p wawk-wasi --target wasm32-wasip1 --release
-
-# Build wawk-wasi with WIT plugin host function support
-wasi-plugins:
-	cargo build -p wawk-wasi --target wasm32-wasip1 --release --features plugins
+	cargo component build -p wawk-wasi --release --target wasm32-wasip2
 
 # Build wawk-bindgen for Node.js
 bindgen-node:

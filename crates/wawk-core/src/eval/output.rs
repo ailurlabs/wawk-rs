@@ -4,8 +4,8 @@
 //! When an output format is set (via OUTPUT_FORMAT variable), uses the matching
 //! format dispatcher. Falls back to JSON (the default serialization).
 
-use crate::format_registry::FormatRegistry;
 use crate::eval::Value;
+use crate::format_registry::FormatRegistry;
 
 /// Serialize a Value for output, using the output format if set.
 ///

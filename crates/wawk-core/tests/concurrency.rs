@@ -5,7 +5,9 @@
 //! global mutable state in wawk-core.
 
 use std::thread;
-use wawk_core::traits::{BufferedReader, BufferedWriter, BlockedCommandExecutor, SandboxEnvironment};
+use wawk_core::traits::{
+    BlockedCommandExecutor, BufferedReader, BufferedWriter, SandboxEnvironment,
+};
 use wawk_core::WawkEngine;
 
 /// Test that multiple threads can run independent evaluators simultaneously.

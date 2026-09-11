@@ -122,7 +122,11 @@ impl Lexer {
     pub fn tokenize(input: &str) -> AwkResult<Vec<Token>> {
         if input.len() > Self::MAX_INPUT_SIZE {
             return Err(AwkError::LexError {
-                message: format!("Input size {} exceeds maximum allowed size of {} bytes", input.len(), Self::MAX_INPUT_SIZE),
+                message: format!(
+                    "Input size {} exceeds maximum allowed size of {} bytes",
+                    input.len(),
+                    Self::MAX_INPUT_SIZE
+                ),
                 position: 0,
             });
         }
@@ -156,7 +160,10 @@ impl Lexer {
                 }
                 Err(_) => {
                     return Err(AwkError::LexError {
-                        message: format!("Unexpected character: {:?}", remaining.chars().next().unwrap_or('?')),
+                        message: format!(
+                            "Unexpected character: {:?}",
+                            remaining.chars().next().unwrap_or('?')
+                        ),
                         position: processed.len() - remaining.len(),
                     });
                 }
@@ -724,7 +731,10 @@ mod tests {
     #[test]
     fn test_unterminated_string() {
         let result = Lexer::tokenize("\"hello");
-        assert!(result.is_err(), "unterminated string should produce an error");
+        assert!(
+            result.is_err(),
+            "unterminated string should produce an error"
+        );
     }
 
     #[test]
@@ -776,5 +786,4 @@ mod tests {
             other => panic!("Expected StringLiteral, got {:?}", other),
         }
     }
-
 }

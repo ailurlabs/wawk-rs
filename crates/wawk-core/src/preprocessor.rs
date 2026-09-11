@@ -24,16 +24,13 @@ const MAX_INCLUDE_DEPTH: usize = 16;
 /// AWK built-in function names that should never be rewritten by @plugin.
 const BUILTIN_FUNCTIONS: &[&str] = &[
     // Arithmetic
-    "atan2", "cos", "exp", "int", "log", "rand", "sin", "sqrt", "srand",
-    // String
+    "atan2", "cos", "exp", "int", "log", "rand", "sin", "sqrt", "srand", // String
     "gsub", "index", "length", "match", "split", "sprintf", "sub", "substr", "tolower", "toupper",
     // I/O
     "close", "fflush", "getline", "next", "nextfile", "print", "printf", "system",
     // Type/info
-    "typeof", "strftime", "mktime", "systime",
-    // Array
-    "delete", "in", "asorti", "asort",
-    // Misc
+    "typeof", "strftime", "mktime", "systime", // Array
+    "delete", "in", "asorti", "asort", // Misc
     "and", "compl", "lshift", "or", "rshift", "xor",
 ];
 
@@ -115,12 +112,18 @@ fn apply_plugin_directives(script: &str) -> AwkResult<String> {
     // Build built-in set
     let builtin_set: HashSet<&str> = BUILTIN_FUNCTIONS.iter().copied().collect();
 
-    // Pass 2: process @plugin directives and rewrite function calls
+    // Pass 2: process @plugin and @namespace directives and rewrite function calls
     let mut output = String::with_capacity(script.len());
     let mut current_plugin: Option<String> = None;
 
     for line in script.lines() {
         let trimmed = line.trim();
+
+        // Check for @namespace directive — sets default namespace for unqualified calls
+        if let Some(ns_name) = parse_namespace_directive(trimmed) {
+            output.push_str(&format!("# @namespace {}\n", ns_name));
+            continue;
+        }
 
         // Check for @plugin directive
         if let Some(plugin_name) = parse_plugin_directive(trimmed) {
@@ -174,6 +177,29 @@ fn is_valid_identifier(s: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Parse `@namespace "name"` directive. Returns the namespace name.
+fn parse_namespace_directive(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("@namespace")?;
+    if !rest.starts_with(|c: char| c.is_ascii_whitespace()) {
+        return None;
+    }
+    let rest = rest.trim();
+    if rest.starts_with('"') && rest.len() >= 2 {
+        let inner = &rest[1..];
+        if let Some(end) = inner.find('"') {
+            let name = &inner[..end];
+            if !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Parse `@plugin "name"` directive. Returns the plugin name.
 fn parse_plugin_directive(line: &str) -> Option<String> {
     let rest = line.strip_prefix("@plugin")?;
@@ -192,7 +218,10 @@ fn parse_plugin_directive(line: &str) -> Option<String> {
             let name = &inner[..end];
             if !name.is_empty() {
                 // Validate plugin name: only alphanumeric, hyphens, underscores
-                if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                if !name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                {
                     return None;
                 }
                 return Some(name.to_string());
@@ -323,7 +352,9 @@ mod tests {
 
     impl MapResolver {
         fn new() -> Self {
-            Self { files: HashMap::new() }
+            Self {
+                files: HashMap::new(),
+            }
         }
 
         fn add(&mut self, path: &str, content: &str) -> &mut Self {
@@ -415,7 +446,10 @@ mod tests {
 
     #[test]
     fn test_parse_include_directive() {
-        assert_eq!(parse_include_directive("@include \"foo.awk\""), Some("foo.awk"));
+        assert_eq!(
+            parse_include_directive("@include \"foo.awk\""),
+            Some("foo.awk")
+        );
         assert_eq!(parse_include_directive("@include"), None);
         assert_eq!(parse_include_directive("@include \"\""), None);
         assert_eq!(parse_include_directive("@includefile \"x\""), None);
@@ -443,7 +477,11 @@ mod tests {
         let resolver = MapResolver::new();
         let script = "@plugin \"formula\"\nBEGIN { x = Date(2024, 1, 1) }";
         let result = preprocess(script, &resolver).unwrap();
-        assert!(result.contains("formula_Date(2024, 1, 1)"), "got: {}", result);
+        assert!(
+            result.contains("formula_Date(2024, 1, 1)"),
+            "got: {}",
+            result
+        );
     }
 
     #[test]
@@ -552,6 +590,34 @@ mod tests {
         let result = rewrite_line_with_plugin_prefix(line, "p", &builtins, &user_fns);
         // Foo is outside string, should be rewritten
         assert!(result.contains("p_Foo"), "got: {}", result);
+    }
+
+    #[test]
+    fn test_parse_namespace_directive() {
+        assert_eq!(
+            parse_namespace_directive("@namespace \"formula\""),
+            Some("formula".to_string())
+        );
+        assert_eq!(
+            parse_namespace_directive("@namespace \"my_ns\""),
+            Some("my_ns".to_string())
+        );
+        assert_eq!(parse_namespace_directive("@namespace \"\""), None);
+        assert_eq!(parse_namespace_directive("@namespace"), None);
+        assert_eq!(parse_namespace_directive("@namespacefoo \"x\""), None);
+    }
+
+    #[test]
+    fn test_namespace_directive_in_script() {
+        let resolver = MapResolver::new();
+        let script = "@namespace \"formula\"\nBEGIN { x = sum(1, 2) }";
+        let result = preprocess(script, &resolver).unwrap();
+        assert!(result.contains("# @namespace formula"), "got: {}", result);
+        assert!(
+            result.contains("BEGIN { x = sum(1, 2) }"),
+            "got: {}",
+            result
+        );
     }
 
     #[test]
