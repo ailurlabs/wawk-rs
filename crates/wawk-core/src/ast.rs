@@ -145,6 +145,12 @@ pub enum Expr {
     UnaryOp(UnaryOp, Box<Expr>),
     /// Function call: name(args)
     FuncCall(String, Vec<Expr>),
+    /// Qualified namespace function call: namespace.func(args)
+    QualifiedFuncCall {
+        namespace: String,
+        function: String,
+        args: Vec<Expr>,
+    },
     /// Array subscript: arr[idx]
     ArrayAccess(String, Box<Expr>),
     /// Comparison (used in patterns)
@@ -181,8 +187,15 @@ impl Expr {
     /// Leaf nodes never recursively call eval_expr, so depth checks can be skipped.
     #[inline(always)]
     pub fn is_leaf(&self) -> bool {
-        matches!(self, Expr::Number(_) | Expr::String(_) | Expr::Var(_)
-            | Expr::Record | Expr::BoolLit(_) | Expr::NullLit)
+        matches!(
+            self,
+            Expr::Number(_)
+                | Expr::String(_)
+                | Expr::Var(_)
+                | Expr::Record
+                | Expr::BoolLit(_)
+                | Expr::NullLit
+        )
     }
 }
 

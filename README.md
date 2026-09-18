@@ -34,7 +34,7 @@ assert_eq!(writer.output, "hello\nworld\n");
 
 ### Browser (wasm-bindgen)
 ```javascript
-import init, { exec_awk } from './wawk_bindgen.js';
+import init, { exec_awk } from './wawk.js';
 await init();
 const result = exec_awk('{ print $1, $2 }', 'hello world\nfoo bar\n');
 ```
@@ -64,7 +64,40 @@ Two plugin interfaces:
 - **External Functions**: Export callable functions from Wasm to AWK
 - **Format Handler**: Custom input/output format detection, parsing, and serialization
 
-Plugins are standard WebAssembly components built with `wasm32-unknown-unknown` target.
+Plugins are standard WebAssembly components built to the `wasm32-wasip2` target with `cargo component build` and the `wit-bindgen` v0.42 binding generator.
+
+
+#### Namespace System
+Each plugin declares a namespace in its `__meta__` JSON. Functions are called using qualified notation:
+
+```awk
+# Qualified call: namespace.function(args)
+result = formula.sum(1, 2, 3)
+hash = crypto.sha256("hello")
+expr = cel.eval("x > 5")
+```
+
+The `@plugin` directive sets a default namespace for unqualified calls (in addition to compile-time prefix rewriting):
+
+```awk
+@plugin "formula"
+BEGIN {
+    # Unqualified calls resolve via default namespace
+    x = sum(1, 2, 3)    # equivalent to formula.sum(1, 2, 3)
+}
+```
+
+Available plugin namespaces:
+
+| Namespace | Plugin | Functions |
+|-----------|--------|-----------|
+| `formula` | wawk-formula | sum, eval, average, min, max, ... |
+| `crypto` | wawk-crypto | sha256, md5, hmac, ... |
+| `cel` | wawk-cel | eval, size, map, filter, ... |
+| `jsonata` | wawk-jsonata | eval, path, ... |
+| `oauth` | wawk-oauth | validate, claims, ... |
+| `feel` | wawk-feel | eval, unary_test, ... |
+| `hello` | wawk-hello | greet, echo |
 
 See [SPEC.md](SPEC.md) §3 for the full plugin specification.
 
@@ -99,6 +132,16 @@ Security-by-design with Wasm sandboxing. See [SECURITY.md](SECURITY.md) for deta
 | Audit log | 1024 entries |
 | Loop iterations | 100,000,000 |
 
+**SecurityProfile presets** (engine-level deployment tuning; all presets enforce the limits above):
+
+| Preset | Execution timeout | Memory limit | Audit log | Record audit | Intended use |
+|--------|-------------------|--------------|-----------|--------------|--------------|
+| `default` | 300 s | 256 MB | On | Off | General-purpose processing |
+| `strict` | 30 s | 64 MB | On | On | Untrusted input, web-facing services |
+| `relaxed` | 600 s | 512 MB | Off | Off | Trusted internal batch workloads |
+
+**Stack depth:** worker threads run with a 64 MB stack, so deeply nested expressions and recursive user functions fail on the engine's call-depth ceiling (256) instead of a native stack overflow.
+
 **Sandbox properties:**
 - `system()` blocked via `BlockedCommandExecutor`
 - No network/filesystem access in WASM sandbox
@@ -120,7 +163,7 @@ cargo test --test security_tests
 python3 crates/wawk-bindgen/tests/wasmtime_tests.py
 ```
 
-**269+ tests**, all passing.
+**228+ tests**, all passing.
 
 ## Delivery Vehicles
 

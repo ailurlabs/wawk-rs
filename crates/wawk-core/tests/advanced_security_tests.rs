@@ -1,7 +1,9 @@
 //! Advanced security tests - edge cases and fuzzing-style inputs.
 
+use wawk_core::traits::{
+    BlockedCommandExecutor, BufferedReader, BufferedWriter, SandboxEnvironment,
+};
 use wawk_core::WawkEngine;
-use wawk_core::traits::{BufferedReader, BufferedWriter, SandboxEnvironment, BlockedCommandExecutor};
 
 #[test]
 fn test_null_bytes_in_input() {
@@ -11,10 +13,10 @@ fn test_null_bytes_in_input() {
     let mut writer = BufferedWriter::new();
     let env = SandboxEnvironment::default();
     let mut cmd = BlockedCommandExecutor;
-    
+
     let script = "{ print length($0) }";
     let result = engine.execute(script, &mut reader, &mut writer, &env, &mut cmd);
-    
+
     // Should handle null bytes gracefully
     assert!(result.is_ok());
 }
@@ -28,10 +30,10 @@ fn test_very_deeply_nested_arrays() {
     let mut writer = BufferedWriter::new();
     let env = SandboxEnvironment::default();
     let mut cmd = BlockedCommandExecutor;
-    
+
     let script = "{ print $0 }";
     let result = engine.execute(script, &mut reader, &mut writer, &env, &mut cmd);
-    
+
     // Should handle without stack overflow
     assert!(result.is_ok());
 }
@@ -40,16 +42,18 @@ fn test_very_deeply_nested_arrays() {
 fn test_very_wide_json_object() {
     let engine = WawkEngine::new();
     // Create JSON object with many fields
-    let fields: Vec<String> = (0..1000).map(|i| format!("\"field{}\": {}", i, i)).collect();
+    let fields: Vec<String> = (0..1000)
+        .map(|i| format!("\"field{}\": {}", i, i))
+        .collect();
     let json = format!("{{{{{}}}}}", fields.join(","));
     let mut reader = BufferedReader::new(&json);
     let mut writer = BufferedWriter::new();
     let env = SandboxEnvironment::default();
     let mut cmd = BlockedCommandExecutor;
-    
+
     let script = "{ print $.field0 }";
     let result = engine.execute(script, &mut reader, &mut writer, &env, &mut cmd);
-    
+
     // Should handle large objects
     assert!(result.is_ok());
 }
@@ -61,10 +65,10 @@ fn test_regex_with_special_chars() {
     let mut writer = BufferedWriter::new();
     let env = SandboxEnvironment::default();
     let mut cmd = BlockedCommandExecutor;
-    
+
     let script = "/\\(.*\\)/ { print }";
     let result = engine.execute(script, &mut reader, &mut writer, &env, &mut cmd);
-    
+
     assert!(result.is_ok());
 }
 
@@ -75,10 +79,10 @@ fn test_empty_json_object() {
     let mut writer = BufferedWriter::new();
     let env = SandboxEnvironment::default();
     let mut cmd = BlockedCommandExecutor;
-    
+
     let script = "{ print $0 }";
     let result = engine.execute(script, &mut reader, &mut writer, &env, &mut cmd);
-    
+
     assert!(result.is_ok());
     assert_eq!(writer.output.trim(), "{}");
 }
@@ -90,10 +94,10 @@ fn test_empty_json_array() {
     let mut writer = BufferedWriter::new();
     let env = SandboxEnvironment::default();
     let mut cmd = BlockedCommandExecutor;
-    
+
     let script = "{ print $0 }";
     let result = engine.execute(script, &mut reader, &mut writer, &env, &mut cmd);
-    
+
     assert!(result.is_ok());
     assert_eq!(writer.output.trim(), "[]");
 }
@@ -105,10 +109,10 @@ fn test_json_with_unicode_keys() {
     let mut writer = BufferedWriter::new();
     let env = SandboxEnvironment::default();
     let mut cmd = BlockedCommandExecutor;
-    
+
     let script = "{ print $0 }";
     let result = engine.execute(script, &mut reader, &mut writer, &env, &mut cmd);
-    
+
     assert!(result.is_ok());
 }
 
@@ -120,10 +124,10 @@ fn test_very_long_field_value() {
     let mut writer = BufferedWriter::new();
     let env = SandboxEnvironment::default();
     let mut cmd = BlockedCommandExecutor;
-    
+
     let script = "{ print length($1) }";
     let result = engine.execute(script, &mut reader, &mut writer, &env, &mut cmd);
-    
+
     // Should handle large fields within memory limits
     assert!(result.is_ok() || writer.output.len() <= 64 * 1024 * 1024);
 }
@@ -136,10 +140,10 @@ fn test_mixed_json_and_text() {
     let mut writer = BufferedWriter::new();
     let env = SandboxEnvironment::default();
     let mut cmd = BlockedCommandExecutor;
-    
+
     let script = "{ print $0 }";
     let result = engine.execute(script, &mut reader, &mut writer, &env, &mut cmd);
-    
+
     assert!(result.is_ok());
     let lines: Vec<&str> = writer.output.trim().split('\n').collect();
     assert_eq!(lines.len(), 3);
@@ -152,10 +156,10 @@ fn test_json_with_null_values() {
     let mut writer = BufferedWriter::new();
     let env = SandboxEnvironment::default();
     let mut cmd = BlockedCommandExecutor;
-    
+
     let script = "{ print $.name, $.age }";
     let result = engine.execute(script, &mut reader, &mut writer, &env, &mut cmd);
-    
+
     assert!(result.is_ok());
 }
 
@@ -166,10 +170,10 @@ fn test_json_with_boolean_values() {
     let mut writer = BufferedWriter::new();
     let env = SandboxEnvironment::default();
     let mut cmd = BlockedCommandExecutor;
-    
+
     let script = "{ print $.active, $.deleted }";
     let result = engine.execute(script, &mut reader, &mut writer, &env, &mut cmd);
-    
+
     assert!(result.is_ok());
 }
 
@@ -180,9 +184,9 @@ fn test_json_with_nested_arrays() {
     let mut writer = BufferedWriter::new();
     let env = SandboxEnvironment::default();
     let mut cmd = BlockedCommandExecutor;
-    
+
     let script = "{ print $0 }";
     let result = engine.execute(script, &mut reader, &mut writer, &env, &mut cmd);
-    
+
     assert!(result.is_ok());
 }

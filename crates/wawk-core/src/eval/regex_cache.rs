@@ -1,8 +1,8 @@
 //! Regex compilation, caching, and pattern matching for AWK.
 
+use crate::error::{AwkError, AwkResult};
 use regex::Regex;
 use rustc_hash::FxHashMap;
-use crate::error::{AwkResult, AwkError};
 
 const REGEX_CACHE_SIZE: usize = 512;
 
@@ -28,9 +28,8 @@ impl RegexCache {
             return Ok(self.cache.get(pattern).unwrap());
         }
 
-        let regex = Regex::new(pattern).map_err(|e| {
-            AwkError::RuntimeError(format!("Invalid regex '{}': {}", pattern, e))
-        })?;
+        let regex = Regex::new(pattern)
+            .map_err(|e| AwkError::RuntimeError(format!("Invalid regex '{}': {}", pattern, e)))?;
 
         if self.cache.len() >= REGEX_CACHE_SIZE {
             if let Some(oldest) = self.access_order.first().cloned() {

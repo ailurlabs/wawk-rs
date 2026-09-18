@@ -382,8 +382,33 @@ pub trait FunctionDispatcher: PluginCapability {
         let _ = (name, args);
         Ok(None) // Default: not handled
     }
-}
 
+    /// Dispatch a qualified namespace function call: namespace.func(args).
+    ///
+    /// Default implementation builds "namespace.func" and delegates to `dispatch()`.
+    /// Override for explicit NamespaceRegistry routing.
+    fn dispatch_qualified(
+        &mut self,
+        namespace: &str,
+        function: &str,
+        args: &[String],
+    ) -> AwkResult<Option<String>> {
+        let qualified_name = format!("{}.{}", namespace, function);
+        self.dispatch(&qualified_name, args)
+    }
+
+    /// Check if a namespace is registered. Default: false (no namespace awareness).
+    fn has_namespace(&self, _ns: &str) -> bool {
+        false
+    }
+
+    /// Set the default namespace for unqualified function resolution.
+    /// Default: no-op. Override in namespace-aware implementations.
+    fn set_default_namespace(&mut self, _ns: &str) {}
+
+    /// Clear the default namespace. Default: no-op.
+    fn clear_default_namespace(&mut self) {}
+}
 
 /// Trait for format dispatcher capability.
 ///
@@ -394,16 +419,18 @@ pub trait FunctionDispatcher: PluginCapability {
 pub trait FormatDispatcher: PluginCapability + Send + Sync {
     /// Format name (e.g., "json", "csv")
     fn name(&self) -> &str;
-    
+
     /// Detect if input matches this format
     fn detect(&self, input: &str) -> bool;
-    
+
     /// Parse input into PropertyTree
     fn parse(&self, input: &str) -> crate::error::AwkResult<crate::types::PropertyTree>;
-    
+
     /// Serialize PropertyTree to this format
     fn serialize(&self, tree: &crate::types::PropertyTree) -> Option<String>;
-    
+
     /// Priority (lower = higher priority)
-    fn priority(&self) -> u32 { 100 }
+    fn priority(&self) -> u32 {
+        100
+    }
 }

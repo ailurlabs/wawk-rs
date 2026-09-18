@@ -3,10 +3,10 @@
 //! Routes input through FormatRegistry for multi-format support.
 //! Contains built-in format handlers compiled for performance.
 
+use super::Value;
 use crate::error::{AwkError, AwkResult};
 use crate::traits::{FormatDispatcher, PluginCapability};
 use crate::types::PropertyTree;
-use super::Value;
 
 /// Built-in JSON format handler.
 /// Compiled-in for performance (hot path: every record).
@@ -52,7 +52,9 @@ impl PluginCapability for BuiltinCsvFormat {
 }
 
 impl FormatDispatcher for BuiltinCsvFormat {
-    fn name(&self) -> &str { "csv" }
+    fn name(&self) -> &str {
+        "csv"
+    }
 
     fn detect(&self, input: &str) -> bool {
         // Single-pass: count commas on first line and verify consistency.
@@ -63,7 +65,9 @@ impl FormatDispatcher for BuiltinCsvFormat {
             None => return false,
         };
         let first_commas = first_line.matches(',').count();
-        if first_commas == 0 { return false; }
+        if first_commas == 0 {
+            return false;
+        }
         // Need at least 2 lines for valid CSV
         let mut has_second = false;
         for line in lines {
@@ -77,15 +81,22 @@ impl FormatDispatcher for BuiltinCsvFormat {
 
     fn parse(&self, input: &str) -> AwkResult<PropertyTree> {
         let lines: Vec<&str> = input.lines().collect();
-        if lines.is_empty() { return Ok(PropertyTree::Array(vec![])); }
-        let headers: Vec<String> = lines[0].split(',')
-            .map(|s| s.trim().to_string()).collect();
+        if lines.is_empty() {
+            return Ok(PropertyTree::Array(vec![]));
+        }
+        let headers: Vec<String> = lines[0].split(',').map(|s| s.trim().to_string()).collect();
         let mut rows = Vec::new();
         for line in &lines[1..] {
-            let values: Vec<String> = line.split(',')
-                .map(|s| s.trim().to_string()).collect();
-            let pairs: Vec<(String, PropertyTree)> = headers.iter().enumerate()
-                .map(|(i, h)| (h.clone(), PropertyTree::String(values.get(i).cloned().unwrap_or_default())))
+            let values: Vec<String> = line.split(',').map(|s| s.trim().to_string()).collect();
+            let pairs: Vec<(String, PropertyTree)> = headers
+                .iter()
+                .enumerate()
+                .map(|(i, h)| {
+                    (
+                        h.clone(),
+                        PropertyTree::String(values.get(i).cloned().unwrap_or_default()),
+                    )
+                })
                 .collect();
             rows.push(PropertyTree::Object(pairs));
         }
@@ -104,8 +115,8 @@ impl FormatDispatcher for BuiltinCsvFormat {
                     // Data rows
                     for row in rows {
                         if let PropertyTree::Object(pairs) = row {
-                            let vals: Vec<String> = pairs.iter()
-                                .map(|(_, v)| v.as_str().to_string()).collect();
+                            let vals: Vec<String> =
+                                pairs.iter().map(|(_, v)| v.as_str().to_string()).collect();
                             out.push_str(&vals.join(","));
                             out.push('\n');
                         }
@@ -117,7 +128,9 @@ impl FormatDispatcher for BuiltinCsvFormat {
         }
     }
 
-    fn priority(&self) -> u32 { 50 }
+    fn priority(&self) -> u32 {
+        50
+    }
 }
 
 /// Built-in XML format handler.
@@ -125,11 +138,15 @@ impl FormatDispatcher for BuiltinCsvFormat {
 pub struct BuiltinXmlFormat;
 
 impl PluginCapability for BuiltinXmlFormat {
-    fn capability_name(&self) -> &'static str { "format_handler" }
+    fn capability_name(&self) -> &'static str {
+        "format_handler"
+    }
 }
 
 impl FormatDispatcher for BuiltinXmlFormat {
-    fn name(&self) -> &str { "xml" }
+    fn name(&self) -> &str {
+        "xml"
+    }
 
     fn detect(&self, input: &str) -> bool {
         let trimmed = input.trim();
@@ -188,7 +205,9 @@ impl FormatDispatcher for BuiltinXmlFormat {
         None // XML serialization not yet implemented
     }
 
-    fn priority(&self) -> u32 { 30 }
+    fn priority(&self) -> u32 {
+        30
+    }
 }
 
 /// Built-in YAML format handler.
@@ -196,11 +215,15 @@ impl FormatDispatcher for BuiltinXmlFormat {
 pub struct BuiltinYamlFormat;
 
 impl PluginCapability for BuiltinYamlFormat {
-    fn capability_name(&self) -> &'static str { "format_handler" }
+    fn capability_name(&self) -> &'static str {
+        "format_handler"
+    }
 }
 
 impl FormatDispatcher for BuiltinYamlFormat {
-    fn name(&self) -> &str { "yaml" }
+    fn name(&self) -> &str {
+        "yaml"
+    }
 
     fn detect(&self, input: &str) -> bool {
         let trimmed = input.trim();
@@ -220,7 +243,9 @@ impl FormatDispatcher for BuiltinYamlFormat {
         None // YAML serialization not yet implemented
     }
 
-    fn priority(&self) -> u32 { 40 }
+    fn priority(&self) -> u32 {
+        40
+    }
 }
 
 /// Convert serde_yaml::Value to PropertyTree.
@@ -230,17 +255,23 @@ fn yaml_to_pt(value: &serde_yaml::Value) -> PropertyTree {
         serde_yaml::Value::Null => PropertyTree::Null,
         serde_yaml::Value::Bool(b) => PropertyTree::Bool(*b),
         serde_yaml::Value::Number(n) => {
-            if let Some(i) = n.as_i64() { PropertyTree::Number(Number::Integer(i)) }
-            else if let Some(f) = n.as_f64() { PropertyTree::Number(Number::Float(f)) }
-            else { PropertyTree::Null }
+            if let Some(i) = n.as_i64() {
+                PropertyTree::Number(Number::Integer(i))
+            } else if let Some(f) = n.as_f64() {
+                PropertyTree::Number(Number::Float(f))
+            } else {
+                PropertyTree::Null
+            }
         }
         serde_yaml::Value::String(s) => PropertyTree::String(s.clone()),
-        serde_yaml::Value::Sequence(arr) => PropertyTree::Array(arr.iter().map(yaml_to_pt).collect()),
-        serde_yaml::Value::Mapping(obj) => {
-            PropertyTree::Object(obj.iter().filter_map(|(k, v)| {
-                k.as_str().map(|k| (k.to_string(), yaml_to_pt(v)))
-            }).collect())
+        serde_yaml::Value::Sequence(arr) => {
+            PropertyTree::Array(arr.iter().map(yaml_to_pt).collect())
         }
+        serde_yaml::Value::Mapping(obj) => PropertyTree::Object(
+            obj.iter()
+                .filter_map(|(k, v)| k.as_str().map(|k| (k.to_string(), yaml_to_pt(v))))
+                .collect(),
+        ),
         _ => PropertyTree::Null,
     }
 }

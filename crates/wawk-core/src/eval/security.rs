@@ -1,7 +1,7 @@
 //! Security limits and audit logging for AWK execution.
 
-use crate::error::{AwkResult, AwkError};
 use super::AuditEvent;
+use crate::error::{AwkError, AwkResult};
 
 pub const MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024; // 64 MB
 pub const MAX_CALL_DEPTH: usize = 256;
@@ -12,12 +12,14 @@ pub const MAX_ARRAY_SIZE: usize = 1_000_000;
 pub const MAX_OPEN_FILES: usize = 256;
 pub const MAX_AUDIT_LOG_ENTRIES: usize = 1024;
 
-
 pub struct SecurityManager {
     pub output_bytes: usize,
     pub call_depth: usize,
     pub expr_depth: usize,
     pub audit_log: Vec<AuditEvent>,
+    /// E4: Count of audit events dropped when log reached capacity.
+    /// Useful for monitoring — if this is non-zero, the log is lossy.
+    pub audit_dropped: usize,
     pub enforce_limits: bool,
 }
 
@@ -28,14 +30,31 @@ impl SecurityManager {
             call_depth: 0,
             expr_depth: 0,
             audit_log: Vec::new(),
+            audit_dropped: 0,
             enforce_limits: true,
         }
     }
 
+    /// Record an audit event (security violation, limit breach, etc.).
+    ///
+    /// E4: Audit log behavior at capacity:
+    /// - When `audit_log.len() < MAX_AUDIT_LOG_ENTRIES` (1024): event is appended.
+    /// - When `audit_log.len() >= MAX_AUDIT_LOG_ENTRIES`: event is silently dropped
+    ///   and `audit_dropped` is incremented. Oldest entries are preserved.
+    ///
+    /// This is a "stop logging when full" strategy — it prevents unbounded memory
+    /// growth (audit bomb prevention) while preserving the first 1024 events for
+    /// post-mortem analysis. Callers can check `audit_dropped` to detect lossiness.
+    ///
+    /// Design rationale: Ring buffer would lose early events (often the most important
+    /// for root cause analysis). Error-on-full would block execution. Silent drop with
+    /// counter provides observability without blocking.
     pub fn record_audit(&mut self, event: AuditEvent) {
-        // Cap audit log to prevent unbounded memory growth (audit bomb prevention)
         if self.audit_log.len() < MAX_AUDIT_LOG_ENTRIES {
             self.audit_log.push(event);
+        } else {
+            // E4: Log is full — drop event and track for monitoring
+            self.audit_dropped += 1;
         }
     }
 
@@ -45,7 +64,7 @@ impl SecurityManager {
         }
 
         self.output_bytes = self.output_bytes.saturating_add(additional_bytes);
-        
+
         if self.output_bytes > MAX_OUTPUT_BYTES {
             self.record_audit(AuditEvent::LimitViolation {
                 limit_name: "MAX_OUTPUT_BYTES".to_string(),
@@ -67,7 +86,7 @@ impl SecurityManager {
         }
 
         self.call_depth += 1;
-        
+
         if self.call_depth > MAX_CALL_DEPTH {
             self.record_audit(AuditEvent::LimitViolation {
                 limit_name: "MAX_CALL_DEPTH".to_string(),
@@ -95,7 +114,7 @@ impl SecurityManager {
         }
 
         self.expr_depth += 1;
-        
+
         if self.expr_depth > MAX_EXPR_DEPTH {
             self.record_audit(AuditEvent::LimitViolation {
                 limit_name: "MAX_EXPR_DEPTH".to_string(),
@@ -141,8 +160,7 @@ impl SecurityManager {
         if size > MAX_ARRAY_SIZE {
             return Err(AwkError::RuntimeError(format!(
                 "Array size exceeded ({} > {})",
-                size,
-                MAX_ARRAY_SIZE
+                size, MAX_ARRAY_SIZE
             )));
         }
 
@@ -150,11 +168,15 @@ impl SecurityManager {
     }
 
     pub fn audit_summary(&self) -> String {
-        if self.audit_log.is_empty() {
+        if self.audit_log.is_empty() && self.audit_dropped == 0 {
             return "No security violations".to_string();
         }
 
-        let mut summary = format!("Security audit: {} violations\n", self.audit_log.len());
+        let mut summary = format!("Security audit: {} violations", self.audit_log.len());
+        if self.audit_dropped > 0 {
+            summary.push_str(&format!(" ({} events dropped due to log capacity)", self.audit_dropped));
+        }
+        summary.push_str("\n");
         for event in &self.audit_log {
             summary.push_str(&format!("  - {:?}\n", event));
         }
@@ -163,6 +185,7 @@ impl SecurityManager {
 
     pub fn clear_audit_log(&mut self) {
         self.audit_log.clear();
+        self.audit_dropped = 0;
     }
 }
 

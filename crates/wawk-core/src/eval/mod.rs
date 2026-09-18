@@ -13,13 +13,13 @@
 //! - Literal pattern fast-path: substring search instead of regex engine
 
 // Sub-modules for modular architecture
-pub mod scope;
-pub mod regex_cache;
-pub mod field_access;
 pub mod builtins;
-pub mod security;
+pub mod field_access;
 pub mod input;
 pub mod output;
+pub mod regex_cache;
+pub mod scope;
+pub mod security;
 pub mod wit_format_bridge;
 // HashMap replaced with FxHashMap for arrays
 use std::borrow::Cow;
@@ -29,14 +29,11 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-
 use crate::ast::*;
 use crate::error::{AwkError, AwkResult};
-use crate::traits::{
-    AwkCommandExecutor, AwkEnvironment, FunctionDispatcher, AwkReader, AwkWriter,
-};
-use crate::types::PluginTypeRegistry;
 use crate::eval::builtins::BuiltinFunctions;
+use crate::traits::{AwkCommandExecutor, AwkEnvironment, AwkReader, AwkWriter, FunctionDispatcher};
+use crate::types::PluginTypeRegistry;
 
 /// The AWK virtual machine / evaluator.
 pub struct Evaluator<'a> {
@@ -69,7 +66,7 @@ pub struct Evaluator<'a> {
     ofs: String,
     ors: String,
     ofmt: String,
-ofmt_precision: usize,
+    ofmt_precision: usize,
     convfmt: String,
     subsep: String,
     fpat: String,
@@ -153,7 +150,8 @@ const MAX_TOTAL_ARRAY_ENTRIES: usize = 1_000_000;
 const MAX_LOOP_ITERATIONS: usize = 100_000_000;
 // Re-export security constants as the single source of truth
 use crate::eval::security::{
-    MAX_CALL_DEPTH, MAX_EXPR_DEPTH, MAX_FIELDS, MAX_OPEN_FILES, MAX_OUTPUT_BYTES, MAX_REGEX_PATTERN_LEN,
+    MAX_CALL_DEPTH, MAX_EXPR_DEPTH, MAX_FIELDS, MAX_OPEN_FILES, MAX_OUTPUT_BYTES,
+    MAX_REGEX_PATTERN_LEN,
 };
 // PropertyTree parsing security limits are defined in crate::types (MAX_PT_*).
 
@@ -179,8 +177,6 @@ fn int_key(n: usize) -> String {
         n.to_string()
     }
 }
-
-
 
 /// Security profile for different deployment contexts.
 /// Compliance: ISO 27001 A.8.1 (Asset Management), SOC 2 CC6.1 (Logical Access)
@@ -237,17 +233,31 @@ impl SecurityProfile {
 #[derive(Debug, Clone)]
 pub enum AuditEvent {
     /// A security limit was hit and execution was aborted
-    LimitViolation { limit_name: String, limit_value: usize, actual_value: usize },
+    LimitViolation {
+        limit_name: String,
+        limit_value: usize,
+        actual_value: usize,
+    },
     /// A sandbox violation was attempted (e.g., system() call)
     SandboxViolation { action: String },
     /// Execution timeout reached
     ExecutionTimeout { elapsed_secs: u64 },
     /// Memory limit approached or exceeded
-    MemoryLimitExceeded { estimated_bytes: usize, limit_bytes: usize },
+    MemoryLimitExceeded {
+        estimated_bytes: usize,
+        limit_bytes: usize,
+    },
     /// Input record processed (for audit trail)
-    RecordProcessed { record_number: usize, input_bytes: usize },
+    RecordProcessed {
+        record_number: usize,
+        input_bytes: usize,
+    },
     /// Execution completed
-    ExecutionComplete { records_processed: usize, output_bytes: usize, total_input_bytes: usize },
+    ExecutionComplete {
+        records_processed: usize,
+        output_bytes: usize,
+        total_input_bytes: usize,
+    },
 }
 
 /// AWK values - everything is either a number or a string.
@@ -297,7 +307,13 @@ impl Value {
                     let mut buf = itoa::Buffer::new();
                     Cow::Owned(buf.format(*n as i64).to_string())
                 } else if !n.is_finite() {
-                    Cow::Borrowed(if n.is_nan() { "nan" } else if n.is_sign_positive() { "inf" } else { "-inf" })
+                    Cow::Borrowed(if n.is_nan() {
+                        "nan"
+                    } else if n.is_sign_positive() {
+                        "inf"
+                    } else {
+                        "-inf"
+                    })
                 } else {
                     let mut buf = ryu::Buffer::new();
                     Cow::Owned(buf.format(*n).to_string())
@@ -387,8 +403,8 @@ impl Value {
 
     /// Convert Value to PropertyTree
     pub fn to_property_tree(&self) -> crate::types::PropertyTree {
-        use crate::types::{PropertyTree, Number};
-        
+        use crate::types::{Number, PropertyTree};
+
         match self {
             Value::Null => PropertyTree::Null,
             Value::Bool(b) => PropertyTree::Bool(*b),
@@ -409,29 +425,24 @@ impl Value {
                 PropertyTree::Object(pt_pairs)
             }
             Value::Array(items) => {
-                let pt_items: Vec<PropertyTree> = items
-                    .iter()
-                    .map(|v| v.to_property_tree())
-                    .collect();
+                let pt_items: Vec<PropertyTree> =
+                    items.iter().map(|v| v.to_property_tree()).collect();
                 PropertyTree::Array(pt_items)
             }
         }
     }
-    
+
     /// Convert PropertyTree to Value
     pub fn from_property_tree(pt: &crate::types::PropertyTree) -> Self {
         use crate::types::PropertyTree;
-        
+
         match pt {
             PropertyTree::Null => Value::Null,
             PropertyTree::Bool(b) => Value::Bool(*b),
             PropertyTree::Number(n) => Value::Number(n.as_f64()),
             PropertyTree::String(s) => Value::Str(s.clone()),
             PropertyTree::Array(items) => {
-                let awk_items: Vec<Value> = items
-                    .iter()
-                    .map(Value::from_property_tree)
-                    .collect();
+                let awk_items: Vec<Value> = items.iter().map(Value::from_property_tree).collect();
                 Value::Array(awk_items)
             }
             PropertyTree::Object(pairs) => {
@@ -516,7 +527,7 @@ impl<'a> Evaluator<'a> {
             ofs: " ".to_string(),
             ors: "\n".to_string(),
             ofmt: "%.6g".to_string(),
-ofmt_precision: 6,
+            ofmt_precision: 6,
             convfmt: "%.6g".to_string(),
             subsep: "\x1c".to_string(),
             fpat: String::new(),
@@ -583,12 +594,22 @@ ofmt_precision: 6,
     /// Set a variable in the global scope (used by CLI -v assignments).
     pub fn set_variable(&mut self, name: String, value: String) {
         match name.as_str() {
-            "FS" => { self.fs = value.clone(); self.format_auto = false; }
+            "FS" => {
+                self.fs = value.clone();
+                self.format_auto = false;
+            }
             "OFS" => self.ofs = value.clone(),
             "ORS" => self.ors = value.clone(),
-            "RS" => { self.rs = value.clone(); self.format_auto = false; }
+            "RS" => {
+                self.rs = value.clone();
+                self.format_auto = false;
+            }
             "OUTPUT_FORMAT" => {
-                self.output_format = if value.is_empty() { None } else { Some(value.clone()) };
+                self.output_format = if value.is_empty() {
+                    None
+                } else {
+                    Some(value.clone())
+                };
             }
             "NF" => self.nf = value.parse().unwrap_or(0),
             "NR" => self.nr = value.parse().unwrap_or(0),
@@ -604,8 +625,6 @@ ofmt_precision: 6,
         self.argc = args.len();
         self.argv = args;
     }
-
-
 
     /// Get regex cache statistics (debug builds only).
     pub fn regex_cache_stats(&self) -> (usize, usize, usize) {
@@ -643,14 +662,14 @@ ofmt_precision: 6,
         }
     }
 
-
-
     /// Check if a program uses PropertyTree-native features (DotAccess, IndexExpr).
     /// When false, we can skip structured data auto-detection for every record.
     fn program_uses_json_features(program: &Program) -> bool {
         program.rules.iter().any(|rule| {
-            let pattern_uses = rule.pattern.as_ref().map_or(false, |p| Self::pattern_uses_json(p));
-            let action_uses = rule.action.as_ref()
+            let pattern_uses = rule.pattern.as_ref().is_some_and(Self::pattern_uses_json);
+            let action_uses = rule
+                .action
+                .as_ref()
                 .map(|a| Self::block_uses_json(&a.statements))
                 .unwrap_or(false);
             pattern_uses || action_uses
@@ -675,22 +694,31 @@ ofmt_precision: 6,
         match stmt {
             Statement::Expr(expr) => Self::expr_uses_json(expr),
             Statement::Print(exprs) => exprs.iter().any(Self::expr_uses_json),
-            Statement::Printf(fmt, args) => Self::expr_uses_json(fmt) || args.iter().any(Self::expr_uses_json),
+            Statement::Printf(fmt, args) => {
+                Self::expr_uses_json(fmt) || args.iter().any(Self::expr_uses_json)
+            }
             Statement::PrintRedirect(exprs, _, target) => {
                 exprs.iter().any(Self::expr_uses_json) || Self::expr_uses_json(target)
             }
             Statement::PrintfRedirect(fmt, args, _, target) => {
-                Self::expr_uses_json(fmt) || args.iter().any(Self::expr_uses_json) || Self::expr_uses_json(target)
+                Self::expr_uses_json(fmt)
+                    || args.iter().any(Self::expr_uses_json)
+                    || Self::expr_uses_json(target)
             }
             Statement::Assign(_, value) => Self::expr_uses_json(value),
             Statement::CompoundAssign(_, _, value) => Self::expr_uses_json(value),
-            Statement::ArrayAssign(_, idx, value) => Self::expr_uses_json(idx) || Self::expr_uses_json(value),
+            Statement::ArrayAssign(_, idx, value) => {
+                Self::expr_uses_json(idx) || Self::expr_uses_json(value)
+            }
             Statement::FieldAssign(_, _) => false,
             Statement::If(cond, then_s, else_s) => {
-                Self::expr_uses_json(cond) || Self::stmt_uses_json(then_s)
+                Self::expr_uses_json(cond)
+                    || Self::stmt_uses_json(then_s)
                     || else_s.as_ref().is_some_and(|s| Self::stmt_uses_json(s))
             }
-            Statement::While(cond, body) => Self::expr_uses_json(cond) || Self::stmt_uses_json(body),
+            Statement::While(cond, body) => {
+                Self::expr_uses_json(cond) || Self::stmt_uses_json(body)
+            }
             Statement::For(init, cond, incr, body) => {
                 init.as_ref().is_some_and(|s| Self::stmt_uses_json(s))
                     || cond.as_ref().is_some_and(|e| Self::expr_uses_json(e))
@@ -708,13 +736,19 @@ ofmt_precision: 6,
         match expr {
             Expr::DotAccess(_, _) | Expr::IndexExpr(_, _) => true,
             Expr::Field(_) | Expr::Record => false,
-            Expr::Number(_) | Expr::String(_) | Expr::Var(_) | Expr::BoolLit(_) | Expr::NullLit => false,
+            Expr::Number(_) | Expr::String(_) | Expr::Var(_) | Expr::BoolLit(_) | Expr::NullLit => {
+                false
+            }
             Expr::BinOp(l, _, r) => Self::expr_uses_json(l) || Self::expr_uses_json(r),
             Expr::UnaryOp(_, e) => Self::expr_uses_json(e),
-            Expr::FuncCall(_, args) => args.iter().any(Self::expr_uses_json),
+            Expr::FuncCall(_, args) | Expr::QualifiedFuncCall { args, .. } => {
+                args.iter().any(Self::expr_uses_json)
+            }
             Expr::ArrayAccess(_, idx) => Self::expr_uses_json(idx),
             Expr::Match(e, _) | Expr::NotMatch(e, _) => Self::expr_uses_json(e),
-            Expr::Ternary(c, t, f) => Self::expr_uses_json(c) || Self::expr_uses_json(t) || Self::expr_uses_json(f),
+            Expr::Ternary(c, t, f) => {
+                Self::expr_uses_json(c) || Self::expr_uses_json(t) || Self::expr_uses_json(f)
+            }
             Expr::Concat(exprs) => exprs.iter().any(Self::expr_uses_json),
             Expr::PostIncrement(e, _) | Expr::PreIncrement(e, _) => Self::expr_uses_json(e),
             Expr::AssignExpr(_, e) => Self::expr_uses_json(e),
@@ -729,8 +763,13 @@ ofmt_precision: 6,
     /// array names, so container-shadow scope scans can be skipped.
     fn program_has_container_literals(program: &Program) -> bool {
         program.rules.iter().any(|rule| {
-            let pattern_has = rule.pattern.as_ref().map_or(false, |p| Self::pattern_has_container(p));
-            let action_has = rule.action.as_ref()
+            let pattern_has = rule
+                .pattern
+                .as_ref()
+                .is_some_and(Self::pattern_has_container);
+            let action_has = rule
+                .action
+                .as_ref()
                 .map(|a| Self::block_has_container(&a.statements))
                 .unwrap_or(false);
             pattern_has || action_has
@@ -780,9 +819,7 @@ ofmt_precision: 6,
                     || Self::stmt_has_container(t)
                     || e.as_ref().is_some_and(|s| Self::stmt_has_container(s))
             }
-            Statement::While(c, b) => {
-                Self::expr_has_container(c) || Self::stmt_has_container(b)
-            }
+            Statement::While(c, b) => Self::expr_has_container(c) || Self::stmt_has_container(b),
             Statement::For(i, c, u, b) => {
                 i.as_ref().is_some_and(|s| Self::stmt_has_container(s))
                     || c.as_ref().is_some_and(|e| Self::expr_has_container(e))
@@ -821,8 +858,13 @@ ofmt_precision: 6,
 
     fn program_needs_fields(program: &Program) -> bool {
         program.rules.iter().any(|rule| {
-            let pattern_needs = rule.pattern.as_ref().map_or(false, |p| Self::pattern_needs_fields(p));
-            let action_needs = rule.action.as_ref()
+            let pattern_needs = rule
+                .pattern
+                .as_ref()
+                .is_some_and(Self::pattern_needs_fields);
+            let action_needs = rule
+                .action
+                .as_ref()
                 .map(|a| Self::block_needs_fields(&a.statements))
                 .unwrap_or(false);
             pattern_needs || action_needs
@@ -847,22 +889,31 @@ ofmt_precision: 6,
         match stmt {
             Statement::Expr(expr) => Self::expr_needs_fields(expr),
             Statement::Print(exprs) => exprs.iter().any(Self::expr_needs_fields),
-            Statement::Printf(fmt, args) => Self::expr_needs_fields(fmt) || args.iter().any(Self::expr_needs_fields),
+            Statement::Printf(fmt, args) => {
+                Self::expr_needs_fields(fmt) || args.iter().any(Self::expr_needs_fields)
+            }
             Statement::PrintRedirect(exprs, _, target) => {
                 exprs.iter().any(Self::expr_needs_fields) || Self::expr_needs_fields(target)
             }
             Statement::PrintfRedirect(fmt, args, _, target) => {
-                Self::expr_needs_fields(fmt) || args.iter().any(Self::expr_needs_fields) || Self::expr_needs_fields(target)
+                Self::expr_needs_fields(fmt)
+                    || args.iter().any(Self::expr_needs_fields)
+                    || Self::expr_needs_fields(target)
             }
             Statement::Assign(_, value) => Self::expr_needs_fields(value),
             Statement::CompoundAssign(_, _, value) => Self::expr_needs_fields(value),
-            Statement::ArrayAssign(_, idx, value) => Self::expr_needs_fields(idx) || Self::expr_needs_fields(value),
+            Statement::ArrayAssign(_, idx, value) => {
+                Self::expr_needs_fields(idx) || Self::expr_needs_fields(value)
+            }
             Statement::FieldAssign(_, _) => true,
             Statement::If(cond, then_s, else_s) => {
-                Self::expr_needs_fields(cond) || Self::stmt_needs_fields(then_s)
+                Self::expr_needs_fields(cond)
+                    || Self::stmt_needs_fields(then_s)
                     || else_s.as_ref().is_some_and(|s| Self::stmt_needs_fields(s))
             }
-            Statement::While(cond, body) => Self::expr_needs_fields(cond) || Self::stmt_needs_fields(body),
+            Statement::While(cond, body) => {
+                Self::expr_needs_fields(cond) || Self::stmt_needs_fields(body)
+            }
             Statement::For(init, cond, incr, body) => {
                 init.as_ref().is_some_and(|s| Self::stmt_needs_fields(s))
                     || cond.as_ref().is_some_and(|e| Self::expr_needs_fields(e))
@@ -873,9 +924,14 @@ ofmt_precision: 6,
             Statement::Block(stmts) => stmts.iter().any(Self::stmt_needs_fields),
             Statement::Return(expr) => expr.as_ref().is_some_and(Self::expr_needs_fields),
             Statement::Getline(var, _) => var.is_some(),
-            Statement::Increment(_, _) | Statement::Next | Statement::NextFile
-            | Statement::Break | Statement::Continue | Statement::Delete(_, _)
-            | Statement::DeleteAll(_) | Statement::Close(_) => false,
+            Statement::Increment(_, _)
+            | Statement::Next
+            | Statement::NextFile
+            | Statement::Break
+            | Statement::Continue
+            | Statement::Delete(_, _)
+            | Statement::DeleteAll(_)
+            | Statement::Close(_) => false,
         }
     }
 
@@ -887,10 +943,16 @@ ofmt_precision: 6,
             Expr::Number(_) | Expr::String(_) | Expr::BoolLit(_) | Expr::NullLit => false,
             Expr::BinOp(l, _, r) => Self::expr_needs_fields(l) || Self::expr_needs_fields(r),
             Expr::UnaryOp(_, e) => Self::expr_needs_fields(e),
-            Expr::FuncCall(_, args) => args.iter().any(Self::expr_needs_fields),
+            Expr::FuncCall(_, args) | Expr::QualifiedFuncCall { args, .. } => {
+                args.iter().any(Self::expr_needs_fields)
+            }
             Expr::ArrayAccess(_, idx) => Self::expr_needs_fields(idx),
             Expr::Match(e, _) | Expr::NotMatch(e, _) => Self::expr_needs_fields(e),
-            Expr::Ternary(c, t, f) => Self::expr_needs_fields(c) || Self::expr_needs_fields(t) || Self::expr_needs_fields(f),
+            Expr::Ternary(c, t, f) => {
+                Self::expr_needs_fields(c)
+                    || Self::expr_needs_fields(t)
+                    || Self::expr_needs_fields(f)
+            }
             Expr::Concat(exprs) => exprs.iter().any(Self::expr_needs_fields),
             Expr::PostIncrement(e, _) | Expr::PreIncrement(e, _) => Self::expr_needs_fields(e),
             Expr::AssignExpr(_, e) => Self::expr_needs_fields(e),
@@ -961,24 +1023,33 @@ ofmt_precision: 6,
         r.push_str(&format!("Records processed: {}\n", self.nr));
         r.push_str(&format!("Input bytes: {}\n", self.total_input_bytes));
         r.push_str(&format!("Output bytes: {}\n", self.security.output_bytes));
-        r.push_str(&format!("Estimated memory: {} bytes\n", self.estimated_memory));
+        r.push_str(&format!(
+            "Estimated memory: {} bytes\n",
+            self.estimated_memory
+        ));
         r.push_str(&format!("Audit events: {}\n", self.audit_log.len()));
         for (i, event) in self.audit_log.iter().enumerate() {
             r.push_str(&format!("  [{}] {:?}\n", i + 1, event));
         }
-        r.push_str(&format!("Security profile: max_exec={}s, max_mem={} bytes, audit={}\n",
+        r.push_str(&format!(
+            "Security profile: max_exec={}s, max_mem={} bytes, audit={}\n",
             self.security_profile.max_execution_secs,
             self.security_profile.max_memory_bytes,
-            self.security_profile.audit_enabled));
+            self.security_profile.audit_enabled
+        ));
         r
     }
 
     pub fn execute(&mut self, program: &Program) -> AwkResult<()> {
         // Compliance: Reset execution timer and audit state
         #[cfg(not(target_arch = "wasm32"))]
-        { self.exec_start_time = std::time::Instant::now(); }
+        {
+            self.exec_start_time = std::time::Instant::now();
+        }
         #[cfg(target_arch = "wasm32")]
-        { self.exec_start_counter = 0; }
+        {
+            self.exec_start_counter = 0;
+        }
         self.audit_log.clear();
         self.estimated_memory = 0;
         self.total_input_bytes = 0;
@@ -1051,7 +1122,9 @@ ofmt_precision: 6,
                     Some(Pattern::Range(_, _)) => None,
                     _ => hot,
                 }
-            } else { None }
+            } else {
+                None
+            }
         };
 
         // ARGV-driven main loop: iterate over files in ARGV
@@ -1076,7 +1149,9 @@ ofmt_precision: 6,
                 if self.security_profile.max_execution_secs > 0 && (self.nr & 1023) == 0 {
                     let elapsed = self.exec_start_time.elapsed().as_secs();
                     if elapsed > self.security_profile.max_execution_secs {
-                        self.security.record_audit(AuditEvent::ExecutionTimeout { elapsed_secs: elapsed });
+                        self.security.record_audit(AuditEvent::ExecutionTimeout {
+                            elapsed_secs: elapsed,
+                        });
                         return Err(AwkError::RuntimeError(format!(
                             "Execution timeout exceeded ({}s limit)",
                             self.security_profile.max_execution_secs
@@ -1089,9 +1164,14 @@ ofmt_precision: 6,
                 #[cfg(target_arch = "wasm32")]
                 if self.security_profile.max_execution_secs > 0 {
                     self.exec_start_counter += 1;
-                    let budget = self.security_profile.max_execution_secs.saturating_mul(100_000);
+                    let budget = self
+                        .security_profile
+                        .max_execution_secs
+                        .saturating_mul(100_000);
                     if self.exec_start_counter > budget {
-                        self.security.record_audit(AuditEvent::ExecutionTimeout { elapsed_secs: self.security_profile.max_execution_secs });
+                        self.security.record_audit(AuditEvent::ExecutionTimeout {
+                            elapsed_secs: self.security_profile.max_execution_secs,
+                        });
                         return Err(AwkError::RuntimeError(format!(
                             "Execution record budget exceeded ({} record limit for {}s)",
                             budget, self.security_profile.max_execution_secs
@@ -1126,9 +1206,12 @@ ofmt_precision: 6,
                 // This eliminates per-record trait dispatch for plain text input.
                 {
                     let first_byte = self.field.line_buf.as_bytes().first().copied().unwrap_or(0);
-                    let could_be_structured = self.format_auto && matches!(first_byte, b'{' | b'[' | b'<' | b'-');
+                    let could_be_structured =
+                        self.format_auto && matches!(first_byte, b'{' | b'[' | b'<' | b'-');
                     if could_be_structured {
-                        if let Some(result) = self.format_registry.detect_and_parse(&self.field.line_buf) {
+                        if let Some(result) =
+                            self.format_registry.detect_and_parse(&self.field.line_buf)
+                        {
                             match result {
                                 Ok((tree, _format_name)) => {
                                     self.nf = tree.len();
@@ -1136,7 +1219,9 @@ ofmt_precision: 6,
                                         self.field.fields.clear();
                                         self.field.fields.push(String::new());
                                         for elem in arr {
-                                            self.field.fields.push(serialize_for_output(&Value::from_property_tree(elem)));
+                                            self.field.fields.push(serialize_for_output(
+                                                &Value::from_property_tree(elem),
+                                            ));
                                         }
                                         self.field.fields_modified = true;
                                     }
@@ -1144,16 +1229,22 @@ ofmt_precision: 6,
                                 }
                                 Err(_) => {
                                     self.property_tree = None;
-                                    if needs_fields { self.split_fields_inplace()?; }
+                                    if needs_fields {
+                                        self.split_fields_inplace()?;
+                                    }
                                 }
                             }
                         } else {
                             self.property_tree = None;
-                            if needs_fields { self.split_fields_inplace()?; }
+                            if needs_fields {
+                                self.split_fields_inplace()?;
+                            }
                         }
                     } else {
                         self.property_tree = None;
-                        if needs_fields { self.split_fields_inplace()?; }
+                        if needs_fields {
+                            self.split_fields_inplace()?;
+                        }
                     }
                 }
 
@@ -1195,9 +1286,15 @@ ofmt_precision: 6,
                         } else if let Some(ref pt) = self.property_tree {
                             let val = Value::from_property_tree(pt);
                             let json_str = crate::eval::output::serialize_output(
-                                &val, &self.format_registry, self.output_format.as_deref()
-                            ).unwrap_or_else(|| serialize_for_output(&val));
-                            self.security.output_bytes = self.security.output_bytes.saturating_add(json_str.len() + self.ors.len());
+                                &val,
+                                &self.format_registry,
+                                self.output_format.as_deref(),
+                            )
+                            .unwrap_or_else(|| serialize_for_output(&val));
+                            self.security.output_bytes = self
+                                .security
+                                .output_bytes
+                                .saturating_add(json_str.len() + self.ors.len());
                             if self.security.output_bytes > MAX_OUTPUT_BYTES {
                                 return Err(AwkError::RuntimeError(format!(
                                     "Output size limit exceeded ({} MB max)",
@@ -1207,8 +1304,11 @@ ofmt_precision: 6,
                             self.writer.write_str(&json_str)?;
                             self.writer.write_str(&self.ors)?;
                         } else {
-                            self.security.output_bytes += self.field.line_buf.len() + self.ors.len();
-                            if (self.nr & 1023) == 0 && self.security.output_bytes > MAX_OUTPUT_BYTES {
+                            self.security.output_bytes +=
+                                self.field.line_buf.len() + self.ors.len();
+                            if (self.nr & 1023) == 0
+                                && self.security.output_bytes > MAX_OUTPUT_BYTES
+                            {
                                 return Err(AwkError::RuntimeError(format!(
                                     "Output size limit exceeded ({} MB max)",
                                     MAX_OUTPUT_BYTES / (1024 * 1024)
@@ -1219,23 +1319,35 @@ ofmt_precision: 6,
                         }
                     }
                 } else {
+                    for (rule_idx, rule) in program.rules.iter().enumerate() {
+                        match &rule.pattern {
+                            Some(Pattern::Begin) | Some(Pattern::End) => continue,
+                            _ => {}
+                        }
 
-                for (rule_idx, rule) in program.rules.iter().enumerate() {
-                    match &rule.pattern {
-                        Some(Pattern::Begin) | Some(Pattern::End) => continue,
-                        _ => {}
-                    }
-
-                    let matches = match &rule.pattern {
-                        None => true,
-                        Some(Pattern::Regex(_)) => {
-                            // Check pre-filter first: if exact mode and passes, skip regex entirely
-                            if let Some(Some(pf)) = pre_filters.get(rule_idx) {
-                                if let Some(result) = pf.check(&self.field.line_buf) {
-                                    result
+                        let matches = match &rule.pattern {
+                            None => true,
+                            Some(Pattern::Regex(_)) => {
+                                // Check pre-filter first: if exact mode and passes, skip regex entirely
+                                if let Some(Some(pf)) = pre_filters.get(rule_idx) {
+                                    if let Some(result) = pf.check(&self.field.line_buf) {
+                                        result
+                                    } else if let Some(Some(re)) = precompiled.get(rule_idx) {
+                                        re.is_match(&self.field.line_buf)
+                                    } else {
+                                        let re_str = match &rule.pattern {
+                                            Some(Pattern::Regex(s)) => s.as_str(),
+                                            _ => unreachable!(),
+                                        };
+                                        match regex::Regex::new(re_str) {
+                                            Ok(re) => re.is_match(&self.field.line_buf),
+                                            Err(_) => false,
+                                        }
+                                    }
                                 } else if let Some(Some(re)) = precompiled.get(rule_idx) {
                                     re.is_match(&self.field.line_buf)
                                 } else {
+                                    // Fallback: compile inline (avoids &mut self cache conflict)
                                     let re_str = match &rule.pattern {
                                         Some(Pattern::Regex(s)) => s.as_str(),
                                         _ => unreachable!(),
@@ -1245,88 +1357,80 @@ ofmt_precision: 6,
                                         Err(_) => false,
                                     }
                                 }
-                            } else if let Some(Some(re)) = precompiled.get(rule_idx) {
-                                re.is_match(&self.field.line_buf)
-                            } else {
-                                // Fallback: compile inline (avoids &mut self cache conflict)
-                                let re_str = match &rule.pattern {
-                                    Some(Pattern::Regex(s)) => s.as_str(),
-                                    _ => unreachable!(),
-                                };
-                                match regex::Regex::new(re_str) {
-                                    Ok(re) => re.is_match(&self.field.line_buf),
-                                    Err(_) => false,
-                                }
                             }
-                        }
-                        Some(Pattern::Expression(expr)) => {
-                            let val = self.eval_expr(expr)?;
-                            val.is_truthy()
-                        }
-                        Some(Pattern::Range(start_pat, end_pat)) => {
-                            let active = self.range_active.get(rule_idx).copied().unwrap_or(false);
-                            // Use mem::take to avoid clone: take ownership of line_buf temporarily
-                            let line = std::mem::take(&mut self.field.line_buf);
-                            let result = if !active {
-                                let start_matches =
-                                    self.pattern_matches(start_pat, &line)?;
-                                if start_matches {
-                                    self.range_active[rule_idx] = true;
-                                    true
+                            Some(Pattern::Expression(expr)) => {
+                                let val = self.eval_expr(expr)?;
+                                val.is_truthy()
+                            }
+                            Some(Pattern::Range(start_pat, end_pat)) => {
+                                let active =
+                                    self.range_active.get(rule_idx).copied().unwrap_or(false);
+                                // Use mem::take to avoid clone: take ownership of line_buf temporarily
+                                let line = std::mem::take(&mut self.field.line_buf);
+                                let result = if !active {
+                                    let start_matches = self.pattern_matches(start_pat, &line)?;
+                                    if start_matches {
+                                        self.range_active[rule_idx] = true;
+                                        true
+                                    } else {
+                                        false
+                                    }
                                 } else {
-                                    false
-                                }
-                            } else {
-                                let end_matches =
-                                    self.pattern_matches(end_pat, &line)?;
-                                if end_matches {
-                                    self.range_active[rule_idx] = false;
-                                }
-                                true
-                            };
-                            self.field.line_buf = line;
-                            result
-                        }
-                        _ => true,
-                    };
+                                    let end_matches = self.pattern_matches(end_pat, &line)?;
+                                    if end_matches {
+                                        self.range_active[rule_idx] = false;
+                                    }
+                                    true
+                                };
+                                self.field.line_buf = line;
+                                result
+                            }
+                            _ => true,
+                        };
 
-                    if matches {
-                        if let Some(action) = &rule.action {
-                            let signal = self.exec_statements(&action.statements)?;
-                            if matches!(signal, EvalSignal::Next) {
-                                break;
-                            }
-                            if matches!(signal, EvalSignal::NextFile) {
-                                self.fnr = 0;
-                                self.reader.skip_to_next_file();
-                                break;
-                            }
-                            if matches!(signal, EvalSignal::Return(_)) {
-                                return Ok(());
-                            }
-                        } else {
-                            // Default action: print record
-                            if let Some(ref pt) = self.property_tree {
-                                let val = Value::from_property_tree(pt);
-                                let json_str = crate::eval::output::serialize_output(
-                                    &val, &self.format_registry, self.output_format.as_deref()
-                                ).unwrap_or_else(|| serialize_for_output(&val));
-                                self.security.output_bytes = self.security.output_bytes.saturating_add(json_str.len() + self.ors.len());
-                                if self.security.output_bytes > MAX_OUTPUT_BYTES {
-                                    return Err(AwkError::RuntimeError(format!(
-                                        "Output size limit exceeded ({} MB max)",
-                                        MAX_OUTPUT_BYTES / (1024 * 1024)
-                                    )));
+                        if matches {
+                            if let Some(action) = &rule.action {
+                                let signal = self.exec_statements(&action.statements)?;
+                                if matches!(signal, EvalSignal::Next) {
+                                    break;
                                 }
-                                self.writer.write_str(&json_str)?;
-                                self.writer.write_str(&self.ors)?;
+                                if matches!(signal, EvalSignal::NextFile) {
+                                    self.fnr = 0;
+                                    self.reader.skip_to_next_file();
+                                    break;
+                                }
+                                if matches!(signal, EvalSignal::Return(_)) {
+                                    return Ok(());
+                                }
                             } else {
-                                self.writer.write_str(&self.field.line_buf)?;
-                                self.writer.write_str(&self.ors)?;
+                                // Default action: print record
+                                if let Some(ref pt) = self.property_tree {
+                                    let val = Value::from_property_tree(pt);
+                                    let json_str = crate::eval::output::serialize_output(
+                                        &val,
+                                        &self.format_registry,
+                                        self.output_format.as_deref(),
+                                    )
+                                    .unwrap_or_else(|| serialize_for_output(&val));
+                                    self.security.output_bytes = self
+                                        .security
+                                        .output_bytes
+                                        .saturating_add(json_str.len() + self.ors.len());
+                                    if self.security.output_bytes > MAX_OUTPUT_BYTES {
+                                        return Err(AwkError::RuntimeError(format!(
+                                            "Output size limit exceeded ({} MB max)",
+                                            MAX_OUTPUT_BYTES / (1024 * 1024)
+                                        )));
+                                    }
+                                    self.writer.write_str(&json_str)?;
+                                    self.writer.write_str(&self.ors)?;
+                                } else {
+                                    self.writer.write_str(&self.field.line_buf)?;
+                                    self.writer.write_str(&self.ors)?;
+                                }
                             }
                         }
                     }
-                }
                 }
             }
 
@@ -1484,7 +1588,9 @@ ofmt_precision: 6,
                 Ok(re) => {
                     let mut last_end = 0;
                     for m in re.find_iter(&line) {
-                        self.field.fields.push(line[last_end..m.start()].to_string());
+                        self.field
+                            .fields
+                            .push(line[last_end..m.start()].to_string());
                         last_end = m.end();
                     }
                     self.field.fields.push(line[last_end..].to_string());
@@ -1513,7 +1619,9 @@ ofmt_precision: 6,
                 actual_value: self.field.fields.len(),
             });
             return Err(AwkError::RuntimeError(format!(
-                "Field count {} exceeds maximum allowed ({})", self.field.fields.len(), MAX_FIELDS
+                "Field count {} exceeds maximum allowed ({})",
+                self.field.fields.len(),
+                MAX_FIELDS
             )));
         }
         Ok(())
@@ -1612,7 +1720,10 @@ ofmt_precision: 6,
     fn pattern_matches(&mut self, pattern: &Pattern, line: &str) -> AwkResult<bool> {
         match pattern {
             Pattern::Regex(re) => self.matches_regex(line, re),
-            Pattern::Expression(_) => self.matches_regex(line, ""),
+            Pattern::Expression(expr) => {
+                let val = self.eval_expr(expr)?;
+                Ok(val.is_truthy())
+            }
             _ => Ok(false),
         }
     }
@@ -1642,9 +1753,15 @@ ofmt_precision: 6,
                     if let Some(ref pt) = self.property_tree {
                         let val = Value::from_property_tree(pt);
                         let json_str = crate::eval::output::serialize_output(
-                            &val, &self.format_registry, self.output_format.as_deref()
-                        ).unwrap_or_else(|| serialize_for_output(&val));
-                        self.security.output_bytes = self.security.output_bytes.saturating_add(json_str.len() + self.ors.len());
+                            &val,
+                            &self.format_registry,
+                            self.output_format.as_deref(),
+                        )
+                        .unwrap_or_else(|| serialize_for_output(&val));
+                        self.security.output_bytes = self
+                            .security
+                            .output_bytes
+                            .saturating_add(json_str.len() + self.ors.len());
                         if self.security.output_bytes > MAX_OUTPUT_BYTES {
                             return Err(AwkError::RuntimeError(format!(
                                 "Output size limit exceeded ({} MB max)",
@@ -1656,7 +1773,10 @@ ofmt_precision: 6,
                         return Ok(EvalSignal::None);
                     }
                     // Text mode: zero-copy
-                    self.security.output_bytes = self.security.output_bytes.saturating_add(self.field.line_buf.len() + self.ors.len());
+                    self.security.output_bytes = self
+                        .security
+                        .output_bytes
+                        .saturating_add(self.field.line_buf.len() + self.ors.len());
                     // Security: amortized output limit check (every 1024 records)
                     if (self.nr & 1023) == 0 && self.security.output_bytes > MAX_OUTPUT_BYTES {
                         self.security.record_audit(AuditEvent::LimitViolation {
@@ -1679,9 +1799,15 @@ ofmt_precision: 6,
                         if let Some(ref pt) = self.property_tree {
                             let val = Value::from_property_tree(pt);
                             let json_str = crate::eval::output::serialize_output(
-                                &val, &self.format_registry, self.output_format.as_deref()
-                            ).unwrap_or_else(|| serialize_for_output(&val));
-                            self.security.output_bytes = self.security.output_bytes.saturating_add(json_str.len() + self.ors.len());
+                                &val,
+                                &self.format_registry,
+                                self.output_format.as_deref(),
+                            )
+                            .unwrap_or_else(|| serialize_for_output(&val));
+                            self.security.output_bytes = self
+                                .security
+                                .output_bytes
+                                .saturating_add(json_str.len() + self.ors.len());
                             if self.security.output_bytes > MAX_OUTPUT_BYTES {
                                 return Err(AwkError::RuntimeError(format!(
                                     "Output size limit exceeded ({} MB max)",
@@ -1692,7 +1818,10 @@ ofmt_precision: 6,
                             self.writer.write_str(&self.ors)?;
                             return Ok(EvalSignal::None);
                         }
-                        self.security.output_bytes = self.security.output_bytes.saturating_add(self.field.line_buf.len() + self.ors.len());
+                        self.security.output_bytes = self
+                            .security
+                            .output_bytes
+                            .saturating_add(self.field.line_buf.len() + self.ors.len());
                         self.writer.write_str(&self.field.line_buf)?;
                         self.writer.write_str(&self.ors)?;
                         return Ok(EvalSignal::None);
@@ -1700,18 +1829,29 @@ ofmt_precision: 6,
                     // Ultra-fast path: `print $N` single constant field — zero-copy direct write
                     if let Expr::Field(idx_expr) = &exprs[0] {
                         if let Expr::Number(n) = idx_expr.as_ref() {
-                            if !self.field.fields_modified && !self.field.field_ranges.is_empty() && self.property_tree.is_none() {
+                            if !self.field.fields_modified
+                                && !self.field.field_ranges.is_empty()
+                                && self.property_tree.is_none()
+                            {
                                 let idx = *n as usize;
                                 if idx > 0 {
-                                    if let Some(&(start, end)) = self.field.field_ranges.get(idx - 1) {
-                                        self.security.output_bytes = self.security.output_bytes.saturating_add((end - start) + self.ors.len());
+                                    if let Some(&(start, end)) =
+                                        self.field.field_ranges.get(idx - 1)
+                                    {
+                                        self.security.output_bytes = self
+                                            .security
+                                            .output_bytes
+                                            .saturating_add((end - start) + self.ors.len());
                                         self.writer.write_str(&self.field.line_buf[start..end])?;
                                         self.writer.write_str(&self.ors)?;
                                         return Ok(EvalSignal::None);
                                     }
                                     // Out-of-range field: print empty + ORS
-                                    self.security.output_bytes = self.security.output_bytes.saturating_add(self.ors.len());
-                                    if (self.nr & 1023) == 0 && self.security.output_bytes > MAX_OUTPUT_BYTES {
+                                    self.security.output_bytes =
+                                        self.security.output_bytes.saturating_add(self.ors.len());
+                                    if (self.nr & 1023) == 0
+                                        && self.security.output_bytes > MAX_OUTPUT_BYTES
+                                    {
                                         return Err(AwkError::RuntimeError(format!(
                                             "Output size limit exceeded ({} MB max)",
                                             MAX_OUTPUT_BYTES / (1024 * 1024)
@@ -1726,7 +1866,10 @@ ofmt_precision: 6,
                 }
                 // Performance: fast path for `print $N` (single field, text mode)
                 // Writes directly from byte ranges without eval_expr allocation
-                if !self.field.fields_modified && !self.field.field_ranges.is_empty() && self.property_tree.is_none() {
+                if !self.field.fields_modified
+                    && !self.field.field_ranges.is_empty()
+                    && self.property_tree.is_none()
+                {
                     let all_fields = exprs.iter().all(|e| matches!(e, Expr::Field(_)));
                     if all_fields {
                         self.print_buf.clear();
@@ -1739,23 +1882,35 @@ ofmt_precision: 6,
                                 if let Expr::Number(n) = idx_expr.as_ref() {
                                     let idx = *n as usize;
                                     if idx > 0 {
-                                        if let Some(&(start, end)) = self.field.field_ranges.get(idx - 1) {
-                                            self.print_buf.push_str(&self.field.line_buf[start..end]);
+                                        if let Some(&(start, end)) =
+                                            self.field.field_ranges.get(idx - 1)
+                                        {
+                                            self.print_buf
+                                                .push_str(&self.field.line_buf[start..end]);
                                             continue;
                                         }
                                     }
                                 }
                                 // Fallback: evaluate index expression with overflow protection
                                 let idx_f64 = self.eval_expr(idx_expr)?.as_number().max(0.0);
-                                let idx = if idx_f64 > MAX_FIELDS as f64 { MAX_FIELDS } else { idx_f64 as usize };
+                                let idx = if idx_f64 > MAX_FIELDS as f64 {
+                                    MAX_FIELDS
+                                } else {
+                                    idx_f64 as usize
+                                };
                                 if idx > 0 {
-                                    if let Some(&(start, end)) = self.field.field_ranges.get(idx - 1) {
+                                    if let Some(&(start, end)) =
+                                        self.field.field_ranges.get(idx - 1)
+                                    {
                                         self.print_buf.push_str(&self.field.line_buf[start..end]);
                                     }
                                 }
                             }
                         }
-                        self.security.output_bytes = self.security.output_bytes.saturating_add(self.print_buf.len() + self.ors.len());
+                        self.security.output_bytes = self
+                            .security
+                            .output_bytes
+                            .saturating_add(self.print_buf.len() + self.ors.len());
                         self.writer.write_str(&self.print_buf)?;
                         self.writer.write_str(&self.ors)?;
                         return Ok(EvalSignal::None);
@@ -1875,11 +2030,13 @@ ofmt_precision: 6,
                                         Some(Value::Bool(false)) => {
                                             self.print_buf.push('0');
                                         }
-                                        Some(v @ Value::Object(_))
-                                        | Some(v @ Value::Array(_)) => {
+                                        Some(v @ Value::Object(_)) | Some(v @ Value::Array(_)) => {
                                             let s = crate::eval::output::serialize_output(
-                                                v, &self.format_registry, self.output_format.as_deref()
-                                            ).unwrap_or_else(|| serialize_for_output(v));
+                                                v,
+                                                &self.format_registry,
+                                                self.output_format.as_deref(),
+                                            )
+                                            .unwrap_or_else(|| serialize_for_output(v));
                                             self.print_buf.push_str(&s);
                                         }
                                         Some(Value::Uninit) | Some(Value::Null) | None => {}
@@ -1938,7 +2095,8 @@ ofmt_precision: 6,
                             if self.containers_possible {
                                 for scope in self.scope.scope_stack.iter().rev() {
                                     if let Some(v) = scope.get(name.as_str()) {
-                                        container_shadow = matches!(v, Value::Array(_) | Value::Object(_));
+                                        container_shadow =
+                                            matches!(v, Value::Array(_) | Value::Object(_));
                                         break;
                                     }
                                 }
@@ -1950,15 +2108,19 @@ ofmt_precision: 6,
                                 let key_ready = match idx.as_ref() {
                                     Expr::Number(n) if *n >= 0.0 && (*n as usize) as f64 == *n => {
                                         self.array_key_buf.clear();
-                                        self.array_key_buf.push_str(self.num_buf.format(*n as usize));
+                                        self.array_key_buf
+                                            .push_str(self.num_buf.format(*n as usize));
                                         true
                                     }
                                     Expr::Var(vn) => {
                                         let iv = self.get_variable(vn);
                                         match &iv {
-                                            Value::Number(n) if *n >= 0.0 && (*n as usize) as f64 == *n => {
+                                            Value::Number(n)
+                                                if *n >= 0.0 && (*n as usize) as f64 == *n =>
+                                            {
                                                 self.array_key_buf.clear();
-                                                self.array_key_buf.push_str(self.num_buf.format(*n as usize));
+                                                self.array_key_buf
+                                                    .push_str(self.num_buf.format(*n as usize));
                                                 true
                                             }
                                             Value::Str(ks) => {
@@ -2001,21 +2163,33 @@ ofmt_precision: 6,
                                         .get(name.as_str())
                                         .and_then(|arr| arr.get(self.array_key_buf.as_str()));
                                     match fetched {
-                                        Some(Value::Str(s)) => { self.print_buf.push_str(s); }
+                                        Some(Value::Str(s)) => {
+                                            self.print_buf.push_str(s);
+                                        }
                                         Some(Value::Number(n)) => {
-                                            if n.is_finite() && *n == (*n as i64) as f64 && n.abs() < 1e15 {
+                                            if n.is_finite()
+                                                && *n == (*n as i64) as f64
+                                                && n.abs() < 1e15
+                                            {
                                                 let s = self.num_buf.format(*n as i64);
                                                 self.print_buf.push_str(s);
                                             } else {
                                                 self.print_buf.push_str(&self.format_ofmt(n));
                                             }
                                         }
-                                        Some(Value::Bool(true)) => { self.print_buf.push('1'); }
-                                        Some(Value::Bool(false)) => { self.print_buf.push('0'); }
+                                        Some(Value::Bool(true)) => {
+                                            self.print_buf.push('1');
+                                        }
+                                        Some(Value::Bool(false)) => {
+                                            self.print_buf.push('0');
+                                        }
                                         Some(v @ Value::Object(_)) | Some(v @ Value::Array(_)) => {
                                             let s = crate::eval::output::serialize_output(
-                                                v, &self.format_registry, self.output_format.as_deref()
-                                            ).unwrap_or_else(|| serialize_for_output(v));
+                                                v,
+                                                &self.format_registry,
+                                                self.output_format.as_deref(),
+                                            )
+                                            .unwrap_or_else(|| serialize_for_output(v));
                                             self.print_buf.push_str(&s);
                                         }
                                         Some(Value::Uninit) | Some(Value::Null) | None => {
@@ -2045,14 +2219,20 @@ ofmt_precision: 6,
                         Value::Null => {}
                         Value::Object(_) | Value::Array(_) => {
                             let s = crate::eval::output::serialize_output(
-                                &val, &self.format_registry, self.output_format.as_deref()
-                            ).unwrap_or_else(|| serialize_for_output(&val));
+                                &val,
+                                &self.format_registry,
+                                self.output_format.as_deref(),
+                            )
+                            .unwrap_or_else(|| serialize_for_output(&val));
                             self.print_buf.push_str(&s)
                         }
                     }
                 }
                 // Track output size for security limit
-                self.security.output_bytes = self.security.output_bytes.saturating_add(self.print_buf.len() + self.ors.len());
+                self.security.output_bytes = self
+                    .security
+                    .output_bytes
+                    .saturating_add(self.print_buf.len() + self.ors.len());
                 if self.security.output_bytes > MAX_OUTPUT_BYTES {
                     self.security.record_audit(AuditEvent::LimitViolation {
                         limit_name: "MAX_OUTPUT_BYTES".to_string(),
@@ -2076,7 +2256,8 @@ ofmt_precision: 6,
                     .map(|e| self.eval_expr(e))
                     .collect::<AwkResult<Vec<_>>>()?;
                 let output = self.format_printf(&fmt, &arg_vals);
-                self.security.output_bytes = self.security.output_bytes.saturating_add(output.len());
+                self.security.output_bytes =
+                    self.security.output_bytes.saturating_add(output.len());
                 if self.security.output_bytes > MAX_OUTPUT_BYTES {
                     self.security.record_audit(AuditEvent::LimitViolation {
                         limit_name: "MAX_OUTPUT_BYTES".to_string(),
@@ -2119,7 +2300,9 @@ ofmt_precision: 6,
                     match signal {
                         EvalSignal::Break => break,
                         EvalSignal::Continue => continue,
-                        EvalSignal::Next | EvalSignal::NextFile | EvalSignal::Return(_) => return Ok(signal),
+                        EvalSignal::Next | EvalSignal::NextFile | EvalSignal::Return(_) => {
+                            return Ok(signal)
+                        }
                         EvalSignal::None => {}
                     }
                 }
@@ -2151,7 +2334,9 @@ ofmt_precision: 6,
                     match signal {
                         EvalSignal::Break => break,
                         EvalSignal::Continue => {}
-                        EvalSignal::Next | EvalSignal::NextFile | EvalSignal::Return(_) => return Ok(signal),
+                        EvalSignal::Next | EvalSignal::NextFile | EvalSignal::Return(_) => {
+                            return Ok(signal)
+                        }
                         EvalSignal::None => {}
                     }
                     if let Some(incr_expr) = incr {
@@ -2169,7 +2354,8 @@ ofmt_precision: 6,
                         .map(|(k, _)| k)
                         .collect()
                 } else {
-                    self.scope.arrays
+                    self.scope
+                        .arrays
                         .get(array_name)
                         .map(|a| a.keys().cloned().collect())
                         .unwrap_or_default()
@@ -2192,7 +2378,9 @@ ofmt_precision: 6,
                     match signal {
                         EvalSignal::Break => break,
                         EvalSignal::Continue => continue,
-                        EvalSignal::Next | EvalSignal::NextFile | EvalSignal::Return(_) => return Ok(signal),
+                        EvalSignal::Next | EvalSignal::NextFile | EvalSignal::Return(_) => {
+                            return Ok(signal)
+                        }
                         EvalSignal::None => {}
                     }
                 }
@@ -2202,8 +2390,14 @@ ofmt_precision: 6,
             Statement::Assign(name, value) => {
                 let val = self.eval_expr(value)?;
                 match name.as_str() {
-                    "FS" => { self.fs = val.as_string(); self.format_auto = false; }
-                    "RS" => { self.rs = val.as_string(); self.format_auto = false; }
+                    "FS" => {
+                        self.fs = val.as_string();
+                        self.format_auto = false;
+                    }
+                    "RS" => {
+                        self.rs = val.as_string();
+                        self.format_auto = false;
+                    }
                     "OFS" => self.ofs = val.as_string(),
                     "ORS" => self.ors = val.as_string(),
                     "OUTPUT_FORMAT" => {
@@ -2215,9 +2409,11 @@ ofmt_precision: 6,
                     "OFMT" => {
                         let new_ofmt = val.as_string();
                         // Parse precision from %.[digits][gfe] — accept any format char
-                        self.ofmt_precision = new_ofmt.strip_prefix("%.")
+                        self.ofmt_precision = new_ofmt
+                            .strip_prefix("%.")
                             .and_then(|s| {
-                                let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
+                                let digits: String =
+                                    s.chars().take_while(|c| c.is_ascii_digit()).collect();
                                 digits.parse::<usize>().ok()
                             })
                             .unwrap_or(6);
@@ -2260,7 +2456,11 @@ ofmt_precision: 6,
             Statement::FieldAssign(field_expr, value) => {
                 // Clamp field index to prevent overflow from very large f64 values
                 let idx_f64 = self.eval_expr(field_expr)?.as_number().max(0.0);
-                let idx = if idx_f64 > MAX_FIELDS as f64 { MAX_FIELDS } else { idx_f64 as usize };
+                let idx = if idx_f64 > MAX_FIELDS as f64 {
+                    MAX_FIELDS
+                } else {
+                    idx_f64 as usize
+                };
                 let val = self.eval_expr(value)?.as_string();
                 if idx == 0 {
                     self.field.set_field_zero(&val)?;
@@ -2275,7 +2475,11 @@ ofmt_precision: 6,
                     if let Expr::Field(idx_expr) = value {
                         if let Expr::Number(n) = idx_expr.as_ref() {
                             // Clamp field index to prevent overflow
-                            let idx = if *n > MAX_FIELDS as f64 { MAX_FIELDS } else { n.max(0.0) as usize };
+                            let idx = if *n > MAX_FIELDS as f64 {
+                                MAX_FIELDS
+                            } else {
+                                n.max(0.0) as usize
+                            };
                             let field_bytes = self.field.get_field_bytes(idx);
                             // Safe UTF-8 conversion (field_bytes is from line_buf which is always valid UTF-8)
                             let field_str = std::str::from_utf8(field_bytes).unwrap_or("");
@@ -2286,9 +2490,19 @@ ofmt_precision: 6,
                             if self.scope.scope_stack.len() == 1
                                 && !matches!(
                                     name_str,
-                                    "NR" | "NF" | "FNR" | "FS" | "RS" | "OFS" | "ORS"
-                                        | "FILENAME" | "SUBSEP" | "FPAT" | "OFMT"
-                                        | "CONVFMT" | "ARGC" | "ERRNO"
+                                    "NR" | "NF"
+                                        | "FNR"
+                                        | "FS"
+                                        | "RS"
+                                        | "OFS"
+                                        | "ORS"
+                                        | "FILENAME"
+                                        | "SUBSEP"
+                                        | "FPAT"
+                                        | "OFMT"
+                                        | "CONVFMT"
+                                        | "ARGC"
+                                        | "ERRNO"
                                 )
                             {
                                 match self.scope.scope_stack[0].get_mut(name_str) {
@@ -2309,7 +2523,8 @@ ofmt_precision: 6,
                                             BinOp::Mul => 0.0,
                                             _ => unreachable!(),
                                         };
-                                        self.scope.scope_stack[0].insert(name.clone(), Value::Number(result));
+                                        self.scope.scope_stack[0]
+                                            .insert(name.clone(), Value::Number(result));
                                     }
                                 }
                                 return Ok(EvalSignal::None);
@@ -2340,9 +2555,19 @@ ofmt_precision: 6,
                 if self.scope.scope_stack.len() == 1
                     && !matches!(
                         name_str,
-                        "NR" | "NF" | "FNR" | "FS" | "RS" | "OFS" | "ORS"
-                            | "FILENAME" | "SUBSEP" | "FPAT" | "OFMT"
-                            | "CONVFMT" | "ARGC" | "ERRNO"
+                        "NR" | "NF"
+                            | "FNR"
+                            | "FS"
+                            | "RS"
+                            | "OFS"
+                            | "ORS"
+                            | "FILENAME"
+                            | "SUBSEP"
+                            | "FPAT"
+                            | "OFMT"
+                            | "CONVFMT"
+                            | "ARGC"
+                            | "ERRNO"
                     )
                 {
                     let delta = if *is_inc { 1.0 } else { -1.0 };
@@ -2364,7 +2589,11 @@ ofmt_precision: 6,
                     }
                     found.unwrap_or(0.0)
                 };
-                let new_val = if *is_inc { current + 1.0 } else { current - 1.0 };
+                let new_val = if *is_inc {
+                    current + 1.0
+                } else {
+                    current - 1.0
+                };
                 let mut set_in = None;
                 for i in (1..self.scope.scope_stack.len()).rev() {
                     if self.scope.scope_stack[i].contains_key(name_str) {
@@ -2396,7 +2625,8 @@ ofmt_precision: 6,
                 // Security: ENVIRON and ARGV are read-only
                 if array_name == "ENVIRON" || array_name == "ARGV" {
                     return Err(AwkError::RuntimeError(format!(
-                        "attempt to modify read-only array {}", array_name
+                        "attempt to modify read-only array {}",
+                        array_name
                     )));
                 }
                 let key = self.eval_expr(idx)?.as_string();
@@ -2411,7 +2641,8 @@ ofmt_precision: 6,
                 // Security: ENVIRON and ARGV are read-only
                 if array_name == "ENVIRON" || array_name == "ARGV" {
                     return Err(AwkError::RuntimeError(format!(
-                        "attempt to modify read-only array {}", array_name
+                        "attempt to modify read-only array {}",
+                        array_name
                     )));
                 }
                 if let Some(arr) = self.scope.arrays.remove(array_name) {
@@ -2483,8 +2714,11 @@ ofmt_precision: 6,
                             Value::Null => {}
                             Value::Object(_) | Value::Array(_) => {
                                 let s = crate::eval::output::serialize_output(
-                                    &val, &self.format_registry, self.output_format.as_deref()
-                                ).unwrap_or_else(|| serialize_for_output(&val));
+                                    &val,
+                                    &self.format_registry,
+                                    self.output_format.as_deref(),
+                                )
+                                .unwrap_or_else(|| serialize_for_output(&val));
                                 self.print_buf.push_str(&s)
                             }
                         }
@@ -2494,14 +2728,16 @@ ofmt_precision: 6,
                 let target = self.eval_expr(target_expr)?.as_string();
                 match redirect_type {
                     RedirectionType::ToFile | RedirectionType::AppendToFile
-                        if !self.open_files.contains(&target) => {
-                            if self.open_files.len() >= MAX_OPEN_FILES {
-                                return Err(AwkError::RuntimeError(format!(
-                                    "Too many open files ({} max)", MAX_OPEN_FILES
-                                )));
-                            }
-                            self.open_files.insert(target.clone());
+                        if !self.open_files.contains(&target) =>
+                    {
+                        if self.open_files.len() >= MAX_OPEN_FILES {
+                            return Err(AwkError::RuntimeError(format!(
+                                "Too many open files ({} max)",
+                                MAX_OPEN_FILES
+                            )));
                         }
+                        self.open_files.insert(target.clone());
+                    }
                     _ => {}
                 }
                 match redirect_type {
@@ -2527,7 +2763,8 @@ ofmt_precision: 6,
                     .map(|e| self.eval_expr(e))
                     .collect::<AwkResult<Vec<_>>>()?;
                 let output = self.format_printf(&fmt, &arg_vals);
-                self.security.output_bytes = self.security.output_bytes.saturating_add(output.len());
+                self.security.output_bytes =
+                    self.security.output_bytes.saturating_add(output.len());
                 if self.security.output_bytes > MAX_OUTPUT_BYTES {
                     self.security.record_audit(AuditEvent::LimitViolation {
                         limit_name: "MAX_OUTPUT_BYTES".to_string(),
@@ -2542,14 +2779,16 @@ ofmt_precision: 6,
                 let target = self.eval_expr(target_expr)?.as_string();
                 match redirect_type {
                     RedirectionType::ToFile | RedirectionType::AppendToFile
-                        if !self.open_files.contains(&target) => {
-                            if self.open_files.len() >= MAX_OPEN_FILES {
-                                return Err(AwkError::RuntimeError(format!(
-                                    "Too many open files ({} max)", MAX_OPEN_FILES
-                                )));
-                            }
-                            self.open_files.insert(target.clone());
+                        if !self.open_files.contains(&target) =>
+                    {
+                        if self.open_files.len() >= MAX_OPEN_FILES {
+                            return Err(AwkError::RuntimeError(format!(
+                                "Too many open files ({} max)",
+                                MAX_OPEN_FILES
+                            )));
                         }
+                        self.open_files.insert(target.clone());
+                    }
                     _ => {}
                 }
                 match redirect_type {
@@ -2589,7 +2828,9 @@ ofmt_precision: 6,
         self.security.expr_depth += 1;
         if self.security.expr_depth > MAX_EXPR_DEPTH {
             self.security.expr_depth -= 1;
-            return Err(AwkError::RuntimeError("expression nesting too deep".to_string()));
+            return Err(AwkError::RuntimeError(
+                "expression nesting too deep".to_string(),
+            ));
         }
         let result = self.eval_expr_inner(expr);
         self.security.expr_depth -= 1;
@@ -2611,18 +2852,30 @@ ofmt_precision: 6,
             Expr::Field(idx_expr) => {
                 // Clamp field index to prevent overflow from very large f64 values
                 let idx_f64 = self.eval_expr(idx_expr)?.as_number().max(0.0);
-                let idx = if idx_f64 > MAX_FIELDS as f64 { MAX_FIELDS } else { idx_f64 as usize };
+                let idx = if idx_f64 > MAX_FIELDS as f64 {
+                    MAX_FIELDS
+                } else {
+                    idx_f64 as usize
+                };
                 if let Some(ref pt) = self.property_tree {
                     match pt {
                         crate::types::PropertyTree::Object(pairs) => {
-                            if idx == 0 { Ok(Value::from_property_tree(pt)) }
-                            else if idx <= pairs.len() { Ok(Value::from_property_tree(&pairs[idx - 1].1)) }
-                            else { Ok(Value::Str(String::new())) }
+                            if idx == 0 {
+                                Ok(Value::from_property_tree(pt))
+                            } else if idx <= pairs.len() {
+                                Ok(Value::from_property_tree(&pairs[idx - 1].1))
+                            } else {
+                                Ok(Value::Str(String::new()))
+                            }
                         }
                         crate::types::PropertyTree::Array(arr) => {
-                            if idx == 0 { Ok(Value::from_property_tree(pt)) }
-                            else if idx <= arr.len() { Ok(Value::from_property_tree(&arr[idx - 1])) }
-                            else { Ok(Value::Str(String::new())) }
+                            if idx == 0 {
+                                Ok(Value::from_property_tree(pt))
+                            } else if idx <= arr.len() {
+                                Ok(Value::from_property_tree(&arr[idx - 1]))
+                            } else {
+                                Ok(Value::Str(String::new()))
+                            }
                         }
                         _ => Ok(Value::Str(self.field.get_field(idx))),
                     }
@@ -2644,6 +2897,11 @@ ofmt_precision: 6,
                 }
             }
             Expr::FuncCall(name, args) => self.eval_func_call(name, args),
+            Expr::QualifiedFuncCall {
+                namespace,
+                function,
+                args,
+            } => self.eval_qualified_func_call(namespace, function, args),
             Expr::ArrayAccess(name, idx) => {
                 // Fast path: name is a real array or unbound — skip variable lookup.
                 // Only when a VARIABLE of this name holds an Object/Array value do we
@@ -2677,7 +2935,8 @@ ofmt_precision: 6,
                     // For numeric literals, use int_key cache to avoid eval_expr + as_string
                     let found = if matches!(idx.as_ref(), Expr::Field(_)) {
                         self.build_array_key(idx)?;
-                        self.scope.arrays
+                        self.scope
+                            .arrays
                             .get(name)
                             .and_then(|arr| arr.get(self.array_key_buf.as_str()))
                             .cloned()
@@ -2688,7 +2947,8 @@ ofmt_precision: 6,
                             use std::fmt::Write as _;
                             let _ = write!(self.array_key_buf, "{}", *n as usize);
                         }
-                        self.scope.arrays
+                        self.scope
+                            .arrays
                             .get(name)
                             .and_then(|arr| arr.get(self.array_key_buf.as_str()))
                             .cloned()
@@ -2703,14 +2963,21 @@ ofmt_precision: 6,
                                     use std::fmt::Write as _;
                                     let _ = write!(self.array_key_buf, "{}", i);
                                 }
-                                return Ok(self.scope.arrays.get(name)
+                                return Ok(self
+                                    .scope
+                                    .arrays
+                                    .get(name)
                                     .and_then(|arr| arr.get(self.array_key_buf.as_str()))
                                     .cloned()
                                     .unwrap_or(Value::Uninit));
                             }
                         }
                         let key = val.as_string();
-                        self.scope.arrays.get(name).and_then(|arr| arr.get(&key)).cloned()
+                        self.scope
+                            .arrays
+                            .get(name)
+                            .and_then(|arr| arr.get(&key))
+                            .cloned()
                     };
                     return Ok(found.unwrap_or(Value::Uninit));
                 }
@@ -2751,7 +3018,8 @@ ofmt_precision: 6,
                         // For numeric literals, use int_key cache to avoid eval_expr + as_string
                         let found = if matches!(idx.as_ref(), Expr::Field(_)) {
                             self.build_array_key(idx)?;
-                            self.scope.arrays
+                            self.scope
+                                .arrays
                                 .get(name)
                                 .and_then(|arr| arr.get(self.array_key_buf.as_str()))
                                 .cloned()
@@ -2759,7 +3027,11 @@ ofmt_precision: 6,
                             // Fast path: numeric literal - zero-alloc lookup via itoa buffer
                             let mut buf = itoa::Buffer::new();
                             let key = buf.format(*n as usize);
-                            self.scope.arrays.get(name).and_then(|arr| arr.get(key)).cloned()
+                            self.scope
+                                .arrays
+                                .get(name)
+                                .and_then(|arr| arr.get(key))
+                                .cloned()
                         } else {
                             let val = self.eval_expr(idx)?;
                             // Fast path: numeric index -> use int_key cache (avoid String alloc)
@@ -2768,14 +3040,21 @@ ofmt_precision: 6,
                                 if *n >= 0.0 && i as f64 == *n {
                                     let mut buf = itoa::Buffer::new();
                                     let key = buf.format(i);
-                                    return Ok(self.scope.arrays.get(name)
+                                    return Ok(self
+                                        .scope
+                                        .arrays
+                                        .get(name)
                                         .and_then(|arr| arr.get(key))
                                         .cloned()
                                         .unwrap_or(Value::Uninit));
                                 }
                             }
                             let key = val.as_string();
-                            self.scope.arrays.get(name).and_then(|arr| arr.get(&key)).cloned()
+                            self.scope
+                                .arrays
+                                .get(name)
+                                .and_then(|arr| arr.get(&key))
+                                .cloned()
                         };
                         Ok(found.unwrap_or(Value::Uninit))
                     } // end _ fallback arm
@@ -2856,9 +3135,19 @@ ofmt_precision: 6,
                     if self.scope.scope_stack.len() == 1
                         && !matches!(
                             name.as_str(),
-                            "NR" | "NF" | "FNR" | "FS" | "RS" | "OFS" | "ORS"
-                                | "FILENAME" | "SUBSEP" | "FPAT" | "OFMT"
-                                | "CONVFMT" | "ARGC" | "ERRNO"
+                            "NR" | "NF"
+                                | "FNR"
+                                | "FS"
+                                | "RS"
+                                | "OFS"
+                                | "ORS"
+                                | "FILENAME"
+                                | "SUBSEP"
+                                | "FPAT"
+                                | "OFMT"
+                                | "CONVFMT"
+                                | "ARGC"
+                                | "ERRNO"
                         )
                     {
                         if let Some(slot) = self.scope.scope_stack[0].get_mut(name.as_str()) {
@@ -2882,14 +3171,18 @@ ofmt_precision: 6,
                     if let Expr::Field(fidx) = idx_expr.as_ref() {
                         if let Expr::Number(fn_) = fidx.as_ref() {
                             // Clamp field index to prevent overflow
-                            let n = if *fn_ > MAX_FIELDS as f64 { MAX_FIELDS } else { *fn_ as usize };
+                            let n = if *fn_ > MAX_FIELDS as f64 {
+                                MAX_FIELDS
+                            } else {
+                                *fn_ as usize
+                            };
                             let fbytes: Option<&[u8]> = if !self.field.fields_modified {
                                 if n == 0 {
                                     Some(self.field.line_buf.as_bytes())
                                 } else if !self.field.field_ranges.is_empty() {
-                                    self.field.field_ranges
-                                        .get(n - 1)
-                                        .map(|&(start, end)| &self.field.line_buf.as_bytes()[start..end])
+                                    self.field.field_ranges.get(n - 1).map(|&(start, end)| {
+                                        &self.field.line_buf.as_bytes()[start..end]
+                                    })
                                 } else {
                                     None
                                 }
@@ -2899,15 +3192,29 @@ ofmt_precision: 6,
                             if let Some(fbytes) = fbytes {
                                 // Safe UTF-8 conversion (fbytes is from line_buf which is always valid UTF-8)
                                 if let Ok(key) = std::str::from_utf8(fbytes) {
-                                if let Some(arr) = self.scope.arrays.get_mut(arr_name.as_str()) {
-                                    if let Some(slot) = arr.get_mut(key) {
-                                        let old = slot.as_number();
-                                        *slot = Value::Number(if *is_inc {
-                                            old + 1.0
-                                        } else {
-                                            old - 1.0
-                                        });
-                                        return Ok(Value::Number(old));
+                                    if let Some(arr) = self.scope.arrays.get_mut(arr_name.as_str())
+                                    {
+                                        if let Some(slot) = arr.get_mut(key) {
+                                            let old = slot.as_number();
+                                            *slot = Value::Number(if *is_inc {
+                                                old + 1.0
+                                            } else {
+                                                old - 1.0
+                                            });
+                                            return Ok(Value::Number(old));
+                                        }
+                                        if self.total_array_entries + 1 > MAX_TOTAL_ARRAY_ENTRIES {
+                                            return Err(AwkError::RuntimeError(format!(
+                                                "Array size limit exceeded ({} entries max)",
+                                                MAX_TOTAL_ARRAY_ENTRIES
+                                            )));
+                                        }
+                                        self.total_array_entries += 1;
+                                        arr.insert(
+                                            key.to_string(),
+                                            Value::Number(if *is_inc { 1.0 } else { -1.0 }),
+                                        );
+                                        return Ok(Value::Number(0.0));
                                     }
                                     if self.total_array_entries + 1 > MAX_TOTAL_ARRAY_ENTRIES {
                                         return Err(AwkError::RuntimeError(format!(
@@ -2916,26 +3223,13 @@ ofmt_precision: 6,
                                         )));
                                     }
                                     self.total_array_entries += 1;
+                                    let mut arr = FxHashMap::default();
                                     arr.insert(
                                         key.to_string(),
                                         Value::Number(if *is_inc { 1.0 } else { -1.0 }),
                                     );
+                                    self.scope.arrays.insert(arr_name.to_string(), arr);
                                     return Ok(Value::Number(0.0));
-                                }
-                                if self.total_array_entries + 1 > MAX_TOTAL_ARRAY_ENTRIES {
-                                    return Err(AwkError::RuntimeError(format!(
-                                        "Array size limit exceeded ({} entries max)",
-                                        MAX_TOTAL_ARRAY_ENTRIES
-                                    )));
-                                }
-                                self.total_array_entries += 1;
-                                let mut arr = FxHashMap::default();
-                                arr.insert(
-                                    key.to_string(),
-                                    Value::Number(if *is_inc { 1.0 } else { -1.0 }),
-                                );
-                                self.scope.arrays.insert(arr_name.to_string(), arr);
-                                return Ok(Value::Number(0.0));
                                 }
                             }
                         }
@@ -2952,7 +3246,8 @@ ofmt_precision: 6,
                         // Key vacant: allocate owned key from buffer
                         if self.total_array_entries + 1 > MAX_TOTAL_ARRAY_ENTRIES {
                             return Err(AwkError::RuntimeError(format!(
-                                "Array size limit exceeded ({} entries max)", MAX_TOTAL_ARRAY_ENTRIES
+                                "Array size limit exceeded ({} entries max)",
+                                MAX_TOTAL_ARRAY_ENTRIES
                             )));
                         }
                         self.total_array_entries += 1;
@@ -2963,7 +3258,8 @@ ofmt_precision: 6,
                     // Array vacant
                     if self.total_array_entries + 1 > MAX_TOTAL_ARRAY_ENTRIES {
                         return Err(AwkError::RuntimeError(format!(
-                            "Array size limit exceeded ({} entries max)", MAX_TOTAL_ARRAY_ENTRIES
+                            "Array size limit exceeded ({} entries max)",
+                            MAX_TOTAL_ARRAY_ENTRIES
                         )));
                     }
                     self.total_array_entries += 1;
@@ -3003,7 +3299,8 @@ ofmt_precision: 6,
                         // Key vacant: allocate owned key from buffer
                         if self.total_array_entries + 1 > MAX_TOTAL_ARRAY_ENTRIES {
                             return Err(AwkError::RuntimeError(format!(
-                                "Array size limit exceeded ({} entries max)", MAX_TOTAL_ARRAY_ENTRIES
+                                "Array size limit exceeded ({} entries max)",
+                                MAX_TOTAL_ARRAY_ENTRIES
                             )));
                         }
                         self.total_array_entries += 1;
@@ -3014,7 +3311,8 @@ ofmt_precision: 6,
                     // Array vacant
                     if self.total_array_entries + 1 > MAX_TOTAL_ARRAY_ENTRIES {
                         return Err(AwkError::RuntimeError(format!(
-                            "Array size limit exceeded ({} entries max)", MAX_TOTAL_ARRAY_ENTRIES
+                            "Array size limit exceeded ({} entries max)",
+                            MAX_TOTAL_ARRAY_ENTRIES
                         )));
                     }
                     self.total_array_entries += 1;
@@ -3060,36 +3358,51 @@ ofmt_precision: 6,
                 // Performance: fast path for $.field on JSON record (avoids deep clone of $0)
                 if matches!(obj_expr.as_ref(), Expr::Record) {
                     if let Some(ref pt) = self.property_tree {
-                        return Ok(pt.get_field(field).map(Value::from_property_tree).unwrap_or(Value::Null));
+                        return Ok(pt
+                            .get_field(field)
+                            .map(Value::from_property_tree)
+                            .unwrap_or(Value::Null));
                     }
                 }
                 // Chained access: $1.field (evaluate idx BEFORE borrowing property_tree)
                 if let Expr::Field(ref idx_expr) = obj_expr.as_ref() {
                     // Clamp field index to prevent overflow from very large f64 values
                     let idx_f64 = self.eval_expr(idx_expr)?.as_number().max(0.0);
-                    let idx = if idx_f64 > MAX_FIELDS as f64 { MAX_FIELDS } else { idx_f64 as usize };
+                    let idx = if idx_f64 > MAX_FIELDS as f64 {
+                        MAX_FIELDS
+                    } else {
+                        idx_f64 as usize
+                    };
                     if let Some(ref pt) = self.property_tree {
                         let result = match pt {
                             crate::types::PropertyTree::Object(pairs) => {
-                                if idx == 0 { pt.get_field(field).cloned() }
-                                else if idx <= pairs.len() { pairs[idx - 1].1.get_field(field).cloned() }
-                                else { None }
+                                if idx == 0 {
+                                    pt.get_field(field).cloned()
+                                } else if idx <= pairs.len() {
+                                    pairs[idx - 1].1.get_field(field).cloned()
+                                } else {
+                                    None
+                                }
                             }
                             crate::types::PropertyTree::Array(arr) => {
-                                if idx == 0 { pt.get_field(field).cloned() }
-                                else if idx <= arr.len() { arr[idx - 1].get_field(field).cloned() }
-                                else { None }
+                                if idx == 0 {
+                                    pt.get_field(field).cloned()
+                                } else if idx <= arr.len() {
+                                    arr[idx - 1].get_field(field).cloned()
+                                } else {
+                                    None
+                                }
                             }
                             _ => None,
                         };
-                        return Ok(result.map(|v| Value::from_property_tree(&v)).unwrap_or(Value::Null));
+                        return Ok(result
+                            .map(|v| Value::from_property_tree(&v))
+                            .unwrap_or(Value::Null));
                     }
                 }
                 let obj = self.eval_expr(obj_expr)?;
                 match obj {
-                    Value::Object(_) => {
-                        Ok(obj.object_get(field).cloned().unwrap_or(Value::Null))
-                    }
+                    Value::Object(_) => Ok(obj.object_get(field).cloned().unwrap_or(Value::Null)),
                     _ => Ok(Value::Null),
                 }
             }
@@ -3101,12 +3414,20 @@ ofmt_precision: 6,
                         match pt {
                             crate::types::PropertyTree::Array(arr) => {
                                 let i = idx_val.as_number() as i64;
-                                if i < 0 { return Ok(Value::Null); }
-                                return Ok(arr.get(i as usize).map(Value::from_property_tree).unwrap_or(Value::Null));
+                                if i < 0 {
+                                    return Ok(Value::Null);
+                                }
+                                return Ok(arr
+                                    .get(i as usize)
+                                    .map(Value::from_property_tree)
+                                    .unwrap_or(Value::Null));
                             }
                             crate::types::PropertyTree::Object(_) => {
                                 let key = idx_val.as_string();
-                                return Ok(pt.get_field(&key).map(Value::from_property_tree).unwrap_or(Value::Null));
+                                return Ok(pt
+                                    .get_field(&key)
+                                    .map(Value::from_property_tree)
+                                    .unwrap_or(Value::Null));
                             }
                             _ => {}
                         }
@@ -3337,7 +3658,11 @@ ofmt_precision: 6,
                     if bytes.is_ascii() {
                         Ok(Value::Number(bytes.len() as f64))
                     } else {
-                        Ok(Value::Number(std::str::from_utf8(bytes).map(|s| s.chars().count()).unwrap_or(bytes.len()) as f64))
+                        Ok(Value::Number(
+                            std::str::from_utf8(bytes)
+                                .map(|s| s.chars().count())
+                                .unwrap_or(bytes.len()) as f64,
+                        ))
                     }
                 } else {
                     // Check if argument is an array name (length(array) returns element count)
@@ -3355,7 +3680,12 @@ ofmt_precision: 6,
                             if bytes.is_ascii() {
                                 return Ok(Value::Number(bytes.len() as f64));
                             } else {
-                                return Ok(Value::Number(std::str::from_utf8(bytes).map(|s| s.chars().count()).unwrap_or(bytes.len()) as f64));
+                                return Ok(Value::Number(
+                                    std::str::from_utf8(bytes)
+                                        .map(|s| s.chars().count())
+                                        .unwrap_or(bytes.len())
+                                        as f64,
+                                ));
                             }
                         }
                     }
@@ -3373,7 +3703,11 @@ ofmt_precision: 6,
                     Expr::Number(n) => *n as i64,
                     _ => self.eval_expr(&args[1])?.as_number() as i64,
                 };
-                let start = if start_raw < 1 { 0 } else { (start_raw - 1) as usize };
+                let start = if start_raw < 1 {
+                    0
+                } else {
+                    (start_raw - 1) as usize
+                };
                 let length = if args.len() > 2 {
                     Some(match &args[2] {
                         Expr::Number(n) => *n as usize,
@@ -3402,7 +3736,7 @@ ofmt_precision: 6,
                             return Ok(Value::Str(
                                 std::str::from_utf8(&field_bytes[s..end])
                                     .unwrap_or("")
-                                    .to_string()
+                                    .to_string(),
                             ));
                         }
                     }
@@ -3454,18 +3788,22 @@ ofmt_precision: 6,
                 };
                 // Security: prevent writing to ENVIRON (read-only)
                 if array_name == "ENVIRON" {
-                    return Err(AwkError::RuntimeError("attempt to write to read-only array ENVIRON".to_string()));
+                    return Err(AwkError::RuntimeError(
+                        "attempt to write to read-only array ENVIRON".to_string(),
+                    ));
                 }
                 // Ultra-fast path for split($0, a, " ") when $0 has no whitespace:
                 // Avoid take+restore by cloning line_buf directly into array
-                if is_record_arg && sep.as_ref() == " "
+                if is_record_arg
+                    && sep.as_ref() == " "
                     && !self.field.line_buf.is_empty()
                     && !has_whitespace(self.field.line_buf.as_bytes())
                 {
                     let plen = self.field.line_buf.len();
                     if self.total_array_entries + 1 > MAX_TOTAL_ARRAY_ENTRIES {
                         return Err(AwkError::RuntimeError(format!(
-                            "Array size limit exceeded ({} entries max)", MAX_TOTAL_ARRAY_ENTRIES
+                            "Array size limit exceeded ({} entries max)",
+                            MAX_TOTAL_ARRAY_ENTRIES
                         )));
                     }
                     if let Some(arr) = self.scope.arrays.get_mut(array_name) {
@@ -3480,7 +3818,10 @@ ofmt_precision: 6,
                                 *slot = Value::Str(self.field.line_buf.clone());
                             }
                             None => {
-                                arr.insert("1".to_string(), Value::Str(self.field.line_buf.clone()));
+                                arr.insert(
+                                    "1".to_string(),
+                                    Value::Str(self.field.line_buf.clone()),
+                                );
                             }
                         }
                         if old_len > 1 {
@@ -3506,14 +3847,12 @@ ofmt_precision: 6,
                 // -> exactly one part equal to the whole string. Move the owned
                 // string into the array with zero allocations, recycling the
                 // previous element's buffer to restore $0.
-                if sep.as_ref() == " "
-                    && !s.is_empty()
-                    && !has_whitespace(s.as_bytes())
-                {
+                if sep.as_ref() == " " && !s.is_empty() && !has_whitespace(s.as_bytes()) {
                     let plen = s.len();
                     if self.total_array_entries + 1 > MAX_TOTAL_ARRAY_ENTRIES {
                         return Err(AwkError::RuntimeError(format!(
-                            "Array size limit exceeded ({} entries max)", MAX_TOTAL_ARRAY_ENTRIES
+                            "Array size limit exceeded ({} entries max)",
+                            MAX_TOTAL_ARRAY_ENTRIES
                         )));
                     }
                     let mut part = s;
@@ -3562,7 +3901,8 @@ ofmt_precision: 6,
                 // Parts go into self.split_parts (reusable buffer, no Vec alloc per call).
                 self.split_parts.clear();
                 if sep.as_ref() == " " {
-                    self.split_parts.extend(s.split_whitespace().map(String::from));
+                    self.split_parts
+                        .extend(s.split_whitespace().map(String::from));
                 } else if sep.len() == 1 && !Evaluator::is_regex_metachar(sep.as_bytes()[0]) {
                     // Inline single-byte split (avoid function call overhead).
                     // POSIX: empty fields are preserved (split("a,,b",a,",") -> 3).
@@ -3584,7 +3924,8 @@ ofmt_precision: 6,
                 // Security: check array limit before inserting
                 if self.split_parts.len() > MAX_TOTAL_ARRAY_ENTRIES {
                     return Err(AwkError::RuntimeError(format!(
-                        "Array size limit exceeded ({} entries max)", MAX_TOTAL_ARRAY_ENTRIES
+                        "Array size limit exceeded ({} entries max)",
+                        MAX_TOTAL_ARRAY_ENTRIES
                     )));
                 }
                 let count = self.split_parts.len();
@@ -3599,7 +3940,8 @@ ofmt_precision: 6,
                         && self.total_array_entries + (count - old_len) > MAX_TOTAL_ARRAY_ENTRIES
                     {
                         return Err(AwkError::RuntimeError(format!(
-                            "Array size limit exceeded ({} entries max)", MAX_TOTAL_ARRAY_ENTRIES
+                            "Array size limit exceeded ({} entries max)",
+                            MAX_TOTAL_ARRAY_ENTRIES
                         )));
                     }
                     for i in 1..=count {
@@ -3853,7 +4195,8 @@ ofmt_precision: 6,
                             let rust_pat = regex_escape_to_rust(&pattern);
                             if let Ok(re) = self.regex.get_or_compile(&rust_pat) {
                                 if let Some(caps) = re.captures(&s) {
-                                    let arr = self.scope.arrays.entry(arr_name.clone()).or_default();
+                                    let arr =
+                                        self.scope.arrays.entry(arr_name.clone()).or_default();
                                     let old_match_len = arr.len();
                                     arr.clear();
                                     self.total_array_entries =
@@ -3870,9 +4213,12 @@ ofmt_precision: 6,
                                             new_entries += 1;
                                         }
                                     }
-                                    if self.total_array_entries + new_entries > MAX_TOTAL_ARRAY_ENTRIES {
+                                    if self.total_array_entries + new_entries
+                                        > MAX_TOTAL_ARRAY_ENTRIES
+                                    {
                                         return Err(AwkError::RuntimeError(format!(
-                                            "Array size limit exceeded ({} entries max)", MAX_TOTAL_ARRAY_ENTRIES
+                                            "Array size limit exceeded ({} entries max)",
+                                            MAX_TOTAL_ARRAY_ENTRIES
                                         )));
                                     }
                                     self.total_array_entries += new_entries;
@@ -3880,12 +4226,15 @@ ofmt_precision: 6,
                             }
                         }
                     }
-                    self.scope.set_var("RSTART".to_string(), Value::Number(pos as f64));
-                    self.scope.set_var("RLENGTH".to_string(), Value::Number(len as f64));
+                    self.scope
+                        .set_var("RSTART".to_string(), Value::Number(pos as f64));
+                    self.scope
+                        .set_var("RLENGTH".to_string(), Value::Number(len as f64));
                     Ok(Value::Number(pos as f64))
                 } else {
                     self.scope.set_var("RSTART".to_string(), Value::Number(0.0));
-                    self.scope.set_var("RLENGTH".to_string(), Value::Number(-1.0));
+                    self.scope
+                        .set_var("RLENGTH".to_string(), Value::Number(-1.0));
                     Ok(Value::Number(0.0))
                 }
             }
@@ -3932,17 +4281,32 @@ ofmt_precision: 6,
                 s.make_ascii_uppercase();
                 Ok(Value::Str(s))
             }
-            "int" => Ok(Value::Number(BuiltinFunctions::int(self.eval_expr(&args[0])?.as_number()))),
-            "sqrt" => Ok(Value::Number(BuiltinFunctions::sqrt(self.eval_expr(&args[0])?.as_number()))),
+            "int" => Ok(Value::Number(BuiltinFunctions::int(
+                self.eval_expr(&args[0])?.as_number(),
+            ))),
+            "sqrt" => Ok(Value::Number(BuiltinFunctions::sqrt(
+                self.eval_expr(&args[0])?.as_number(),
+            ))),
             "abs" => {
                 let n = self.eval_expr(&args[0])?.as_number();
                 Ok(Value::Number(n.abs()))
             }
-            "log" => Ok(Value::Number(BuiltinFunctions::log(self.eval_expr(&args[0])?.as_number()))),
-            "exp" => Ok(Value::Number(BuiltinFunctions::exp(self.eval_expr(&args[0])?.as_number()))),
-            "sin" => Ok(Value::Number(BuiltinFunctions::sin(self.eval_expr(&args[0])?.as_number()))),
-            "cos" => Ok(Value::Number(BuiltinFunctions::cos(self.eval_expr(&args[0])?.as_number()))),
-            "atan2" => Ok(Value::Number(BuiltinFunctions::atan2(self.eval_expr(&args[0])?.as_number(), self.eval_expr(&args[1])?.as_number()))),
+            "log" => Ok(Value::Number(BuiltinFunctions::log(
+                self.eval_expr(&args[0])?.as_number(),
+            ))),
+            "exp" => Ok(Value::Number(BuiltinFunctions::exp(
+                self.eval_expr(&args[0])?.as_number(),
+            ))),
+            "sin" => Ok(Value::Number(BuiltinFunctions::sin(
+                self.eval_expr(&args[0])?.as_number(),
+            ))),
+            "cos" => Ok(Value::Number(BuiltinFunctions::cos(
+                self.eval_expr(&args[0])?.as_number(),
+            ))),
+            "atan2" => Ok(Value::Number(BuiltinFunctions::atan2(
+                self.eval_expr(&args[0])?.as_number(),
+                self.eval_expr(&args[1])?.as_number(),
+            ))),
             "rand" => {
                 self.rng_state = self
                     .rng_state
@@ -4018,9 +4382,7 @@ ofmt_precision: 6,
                     action: format!("system({})", &cmd_str),
                 });
                 let output = self.cmd.execute(&cmd_str)?;
-                Ok(Value::Number(
-                    output.trim().parse::<f64>().unwrap_or(0.0),
-                ))
+                Ok(Value::Number(output.trim().parse::<f64>().unwrap_or(0.0)))
             }
             "close" => {
                 if args.is_empty() {
@@ -4084,7 +4446,9 @@ ofmt_precision: 6,
 
                 // Security: prevent writing to ENVIRON (read-only)
                 if array_name == "ENVIRON" {
-                    return Err(AwkError::RuntimeError("attempt to write to read-only array ENVIRON".to_string()));
+                    return Err(AwkError::RuntimeError(
+                        "attempt to write to read-only array ENVIRON".to_string(),
+                    ));
                 }
                 let rust_pat = regex_escape_to_rust(&pattern);
                 let re = self.regex.get_or_compile(&rust_pat)?;
@@ -4106,7 +4470,8 @@ ofmt_precision: 6,
                 }
                 if self.total_array_entries + count > MAX_TOTAL_ARRAY_ENTRIES {
                     return Err(AwkError::RuntimeError(format!(
-                        "Array size limit exceeded ({} entries max)", MAX_TOTAL_ARRAY_ENTRIES
+                        "Array size limit exceeded ({} entries max)",
+                        MAX_TOTAL_ARRAY_ENTRIES
                     )));
                 }
                 self.total_array_entries += count;
@@ -4127,7 +4492,8 @@ ofmt_precision: 6,
                     }
                     if self.total_array_entries + seps.len() > MAX_TOTAL_ARRAY_ENTRIES {
                         return Err(AwkError::RuntimeError(format!(
-                            "Array size limit exceeded ({} entries max)", MAX_TOTAL_ARRAY_ENTRIES
+                            "Array size limit exceeded ({} entries max)",
+                            MAX_TOTAL_ARRAY_ENTRIES
                         )));
                     }
                     self.total_array_entries += seps.len();
@@ -4232,7 +4598,10 @@ ofmt_precision: 6,
 
                     // Now borrow handler (avoids conflicting borrow with self)
                     let Some(handler) = self.external_fn.as_deref_mut() else {
-                        return Err(AwkError::RuntimeError(format!("no external function handler for '{}'", name)));
+                        return Err(AwkError::RuntimeError(format!(
+                            "no external function handler for '{}'",
+                            name
+                        )));
                     };
                     // Try String ABI first
                     let str_result = handler.dispatch(name, &str_args);
@@ -4253,6 +4622,75 @@ ofmt_precision: 6,
                 )))
             }
         }
+    }
+
+    /// Evaluate a qualified namespace function call: namespace.func(args).
+    /// Routes explicitly through NamespaceRegistry via dispatch_qualified().
+    fn eval_qualified_func_call(
+        &mut self,
+        namespace: &str,
+        function: &str,
+        args: &[Expr],
+    ) -> AwkResult<Value> {
+        let qualified_name = format!("{}.{}", namespace, function);
+
+        if self.external_fn.is_some() {
+            let str_args: Vec<String> = args
+                .iter()
+                .map(|a| self.eval_expr(a).map(|v| v.as_string()))
+                .collect::<AwkResult<Vec<_>>>()?;
+
+            let Some(handler) = self.external_fn.as_deref_mut() else {
+                return Err(AwkError::RuntimeError(format!(
+                    "no external function handler for '{}'",
+                    qualified_name
+                )));
+            };
+
+            // Step 1: Try explicit namespace-aware dispatch via NamespaceRegistry
+            let str_result = handler.dispatch_qualified(namespace, function, &str_args);
+            match str_result {
+                Ok(Some(result_str)) => {
+                    if result_str.starts_with("ERROR:") {
+                        self.errno = result_str.clone();
+                    }
+                    return Ok(Value::Str(result_str));
+                }
+                Err(e) => return Err(e),
+                Ok(None) => {}
+            }
+
+            // Step 2: Namespace isolation gate (spec Section 5 T1). If the
+            // namespace IS registered, a failed qualified call must error out:
+            // falling back to the unqualified name could silently route to a
+            // DIFFERENT plugin's function with the same name.
+            if handler.has_namespace(namespace) {
+                return Err(AwkError::RuntimeError(format!(
+                    "function '{}' not found in namespace '{}'",
+                    function, namespace
+                )));
+            }
+
+            // Step 3: Legacy fallback — the namespace is NOT registered
+            // (plugin without a namespace declaration, or a host handler that
+            // routes opaque function names). Try the bare function name.
+            let str_result2 = handler.dispatch(function, &str_args);
+            match str_result2 {
+                Ok(Some(result_str)) => {
+                    if result_str.starts_with("ERROR:") {
+                        self.errno = result_str.clone();
+                    }
+                    return Ok(Value::Str(result_str));
+                }
+                Err(e) => return Err(e),
+                Ok(None) => {}
+            }
+        }
+
+        Err(AwkError::RuntimeError(format!(
+            "Unknown function: {} (namespace '{}' not found or function '{}' not registered)",
+            qualified_name, namespace, function
+        )))
     }
 
     /// Check if a string looks like a var=val assignment.
@@ -4297,7 +4735,8 @@ ofmt_precision: 6,
             } else {
                 Value::Uninit
             };
-            self.scope.scope_stack
+            self.scope
+                .scope_stack
                 .last_mut()
                 .unwrap()
                 .insert(param.clone(), val);
@@ -4305,7 +4744,8 @@ ofmt_precision: 6,
 
         // Set local variables
         for local in &func.locals {
-            self.scope.scope_stack
+            self.scope
+                .scope_stack
                 .last_mut()
                 .unwrap()
                 .insert(local.clone(), Value::Uninit);
@@ -4362,7 +4802,8 @@ ofmt_precision: 6,
             } else {
                 Value::Uninit
             };
-            self.scope.scope_stack
+            self.scope
+                .scope_stack
                 .last_mut()
                 .unwrap()
                 .insert(param.clone(), val);
@@ -4370,7 +4811,8 @@ ofmt_precision: 6,
 
         // Set local variables
         for local in &func.locals {
-            self.scope.scope_stack
+            self.scope
+                .scope_stack
                 .last_mut()
                 .unwrap()
                 .insert(local.clone(), Value::Uninit);
@@ -4513,7 +4955,8 @@ ofmt_precision: 6,
                         self.array_key_buf.push_str(&self.field.line_buf);
                     } else if let Some(&(start, end)) = self.field.field_ranges.get(idx - 1) {
                         // line_buf is always valid UTF-8, field boundaries align on char boundaries
-                        self.array_key_buf.push_str(&self.field.line_buf[start..end]);
+                        self.array_key_buf
+                            .push_str(&self.field.line_buf[start..end]);
                     }
                 } else {
                     self.array_key_buf.push_str(&self.field.get_field(idx));
@@ -4622,46 +5065,104 @@ ofmt_precision: 6,
         // Minimal strftime — zero-dependency UTC timestamp formatting.
         // Supports: %Y %m %d %H %M %S %a %b %d %e %j %u %w %% %n %t %p %P
         let (y, mo, d, h, mi, s, wday) = Self::ts_to_components(timestamp);
-        const DAYS: [&str; 7] = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-        const MONTHS: [&str; 12] = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        const MONTHS: [&str; 12] = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
         let yday = Self::day_of_year(y, mo, d);
         let mut out = String::with_capacity(fmt.len() + 16);
         let mut chars = fmt.chars().peekable();
         while let Some(c) = chars.next() {
             if c == '%' {
                 match chars.next() {
-                    Some('Y') => { let _ = write!(out, "{:04}", y); }
-                    Some('y') => { let _ = write!(out, "{:02}", y % 100); }
-                    Some('m') => { let _ = write!(out, "{:02}", mo); }
-                    Some('d') => { let _ = write!(out, "{:02}", d); }
-                    Some('e') => { let _ = write!(out, "{:>2}", d); }
-                    Some('H') => { let _ = write!(out, "{:02}", h); }
-                    Some('M') => { let _ = write!(out, "{:02}", mi); }
-                    Some('S') => { let _ = write!(out, "{:02}", s); }
-                    Some('a') => { out.push_str(DAYS[wday]); }
+                    Some('Y') => {
+                        let _ = write!(out, "{:04}", y);
+                    }
+                    Some('y') => {
+                        let _ = write!(out, "{:02}", y % 100);
+                    }
+                    Some('m') => {
+                        let _ = write!(out, "{:02}", mo);
+                    }
+                    Some('d') => {
+                        let _ = write!(out, "{:02}", d);
+                    }
+                    Some('e') => {
+                        let _ = write!(out, "{:>2}", d);
+                    }
+                    Some('H') => {
+                        let _ = write!(out, "{:02}", h);
+                    }
+                    Some('M') => {
+                        let _ = write!(out, "{:02}", mi);
+                    }
+                    Some('S') => {
+                        let _ = write!(out, "{:02}", s);
+                    }
+                    Some('a') => {
+                        out.push_str(DAYS[wday]);
+                    }
                     Some('A') => {
                         out.push_str(match wday {
-                            0=>"Sunday",1=>"Monday",2=>"Tuesday",3=>"Wednesday",
-                            4=>"Thursday",5=>"Friday",_=>"Saturday"
+                            0 => "Sunday",
+                            1 => "Monday",
+                            2 => "Tuesday",
+                            3 => "Wednesday",
+                            4 => "Thursday",
+                            5 => "Friday",
+                            _ => "Saturday",
                         });
                     }
-                    Some('b') | Some('h') => { out.push_str(MONTHS[(mo - 1) as usize]); }
+                    Some('b') | Some('h') => {
+                        out.push_str(MONTHS[(mo - 1) as usize]);
+                    }
                     Some('B') => {
                         out.push_str(match mo {
-                            1=>"January",2=>"February",3=>"March",4=>"April",5=>"May",6=>"June",
-                            7=>"July",8=>"August",9=>"September",10=>"October",11=>"November",_=>"December"
+                            1 => "January",
+                            2 => "February",
+                            3 => "March",
+                            4 => "April",
+                            5 => "May",
+                            6 => "June",
+                            7 => "July",
+                            8 => "August",
+                            9 => "September",
+                            10 => "October",
+                            11 => "November",
+                            _ => "December",
                         });
                     }
-                    Some('j') => { let _ = write!(out, "{:03}", yday); }
-                    Some('u') => { let _ = write!(out, "{}", if wday == 0 { 7 } else { wday }); }
-                    Some('w') => { let _ = write!(out, "{}", wday); }
-                    Some('p') => { out.push_str(if h < 12 { "AM" } else { "PM" }); }
-                    Some('P') => { out.push_str(if h < 12 { "am" } else { "pm" }); }
-                    Some('n') => { out.push('\n'); }
-                    Some('t') => { out.push('\t'); }
-                    Some('%') => { out.push('%'); }
-                    Some(c) => { out.push('%'); out.push(c); }
-                    None => { out.push('%'); }
+                    Some('j') => {
+                        let _ = write!(out, "{:03}", yday);
+                    }
+                    Some('u') => {
+                        let _ = write!(out, "{}", if wday == 0 { 7 } else { wday });
+                    }
+                    Some('w') => {
+                        let _ = write!(out, "{}", wday);
+                    }
+                    Some('p') => {
+                        out.push_str(if h < 12 { "AM" } else { "PM" });
+                    }
+                    Some('P') => {
+                        out.push_str(if h < 12 { "am" } else { "pm" });
+                    }
+                    Some('n') => {
+                        out.push('\n');
+                    }
+                    Some('t') => {
+                        out.push('\t');
+                    }
+                    Some('%') => {
+                        out.push('%');
+                    }
+                    Some(c) => {
+                        out.push('%');
+                        out.push(c);
+                    }
+                    None => {
+                        out.push('%');
+                    }
                 }
             } else {
                 out.push(c);
@@ -4684,7 +5185,9 @@ ofmt_precision: 6,
                 .filter(|s| !s.is_empty())
                 .filter_map(|s| s.parse().ok())
                 .collect();
-            if p.len() < 6 { return -1; }
+            if p.len() < 6 {
+                return -1;
+            }
             p
         };
         let (yr, mo, dy, hr, mi, sc) = (parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]);
@@ -4697,7 +5200,6 @@ ofmt_precision: 6,
         Self::ymd_hms_to_timestamp(yr, mo as u32, dy as u32, hr as u32, mi as u32, sc as u32)
     }
 
-
     // ── Minimal date/time helpers (replaces chrono) ──────────────────────
 
     fn is_leap_year(y: i32) -> bool {
@@ -4706,16 +5208,33 @@ ofmt_precision: 6,
 
     fn days_in_month(y: i32, m: u32) -> u32 {
         match m {
-            1 => 31, 2 => if Self::is_leap_year(y) { 29 } else { 28 },
-            3 => 31, 4 => 30, 5 => 31, 6 => 30,
-            7 => 31, 8 => 31, 9 => 30, 10 => 31, 11 => 30, 12 => 31,
+            1 => 31,
+            2 => {
+                if Self::is_leap_year(y) {
+                    29
+                } else {
+                    28
+                }
+            }
+            3 => 31,
+            4 => 30,
+            5 => 31,
+            6 => 30,
+            7 => 31,
+            8 => 31,
+            9 => 30,
+            10 => 31,
+            11 => 30,
+            12 => 31,
             _ => 0,
         }
     }
 
     fn day_of_year(y: i32, m: u32, d: u32) -> u32 {
         let mut yday = 0u32;
-        for i in 1..m { yday += Self::days_in_month(y, i); }
+        for i in 1..m {
+            yday += Self::days_in_month(y, i);
+        }
         yday + d
     }
 
@@ -4731,16 +5250,22 @@ ofmt_precision: 6,
         let wday = ((days % 7) + 4).rem_euclid(7) as usize;
         let mut y = 1970;
         loop {
-            if y > 9999 { return (9999, 12, 31, 23, 59, 59, 5); }
+            if y > 9999 {
+                return (9999, 12, 31, 23, 59, 59, 5);
+            }
             let yd = if Self::is_leap_year(y) { 366 } else { 365 };
-            if days < yd { break; }
+            if days < yd {
+                break;
+            }
             days -= yd;
             y += 1;
         }
         let mut mo = 1u32;
         loop {
             let md = Self::days_in_month(y, mo);
-            if days < md as i64 { break; }
+            if days < md as i64 {
+                break;
+            }
             days -= md as i64;
             mo += 1;
         }
@@ -5065,7 +5590,22 @@ impl RegexPreFilter {
         let rust_pat = regex_escape_to_rust(pattern);
         // Check if the pattern is purely literal (no regex metacharacters)
         let is_literal = !rust_pat.bytes().any(|b| {
-            matches!(b, b'.' | b'*' | b'+' | b'?' | b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'\\' | b'^' | b'$' | b'|')
+            matches!(
+                b,
+                b'.' | b'*'
+                    | b'+'
+                    | b'?'
+                    | b'('
+                    | b')'
+                    | b'['
+                    | b']'
+                    | b'{'
+                    | b'}'
+                    | b'\\'
+                    | b'^'
+                    | b'$'
+                    | b'|'
+            )
         });
         RegexPreFilter {
             exact: is_literal,
@@ -5118,8 +5658,16 @@ fn awk_str_to_number(s: &str) -> f64 {
     // Fast path: single character
     if len == 1 {
         return match bytes[0] {
-            b'0' => 0.0, b'1' => 1.0, b'2' => 2.0, b'3' => 3.0, b'4' => 4.0,
-            b'5' => 5.0, b'6' => 6.0, b'7' => 7.0, b'8' => 8.0, b'9' => 9.0,
+            b'0' => 0.0,
+            b'1' => 1.0,
+            b'2' => 2.0,
+            b'3' => 3.0,
+            b'4' => 4.0,
+            b'5' => 5.0,
+            b'6' => 6.0,
+            b'7' => 7.0,
+            b'8' => 8.0,
+            b'9' => 9.0,
             _ => 0.0,
         };
     }
@@ -5146,7 +5694,10 @@ fn awk_str_to_number(s: &str) -> f64 {
         let mut all_digits = true;
         let mut val: u32 = 0;
         for &b in bytes {
-            if !b.is_ascii_digit() { all_digits = false; break; }
+            if !b.is_ascii_digit() {
+                all_digits = false;
+                break;
+            }
             val = val * 10 + (b - b'0') as u32;
         }
         if all_digits {
@@ -5159,7 +5710,10 @@ fn awk_str_to_number(s: &str) -> f64 {
         let mut all_digits = true;
         let mut val: u64 = 0;
         for &b in bytes {
-            if !b.is_ascii_digit() { all_digits = false; break; }
+            if !b.is_ascii_digit() {
+                all_digits = false;
+                break;
+            }
             val = val * 10 + (b - b'0') as u64;
         }
         if all_digits {
@@ -5325,7 +5879,9 @@ fn is_user_variable(name: &str) -> bool {
 mod tests {
     use super::*;
     use crate::parser::parse;
-    use crate::traits::{BufferedReader, BufferedWriter, BlockedCommandExecutor, SandboxEnvironment};
+    use crate::traits::{
+        BlockedCommandExecutor, BufferedReader, BufferedWriter, SandboxEnvironment,
+    };
 
     fn run_awk(script: &str, input: &str) -> String {
         let program = parse(script).unwrap();
@@ -6005,12 +6561,12 @@ mod tests {
                 last_call: RefCell::new(None),
             }
         }
-
-
     }
 
     impl PluginCapability for MockExternalHandler {
-        fn capability_name(&self) -> &'static str { "function_dispatch" }
+        fn capability_name(&self) -> &'static str {
+            "function_dispatch"
+        }
     }
 
     impl FunctionDispatcher for MockExternalHandler {
@@ -6021,9 +6577,151 @@ mod tests {
         }
     }
 
+    /// Mock handler simulating namespace-aware routing. Records every dispatch
+    /// call so tests can assert the exact routing path taken by the evaluator.
+    struct RoutingMockHandler {
+        known_namespaces: Vec<String>,
+        bare_functions: Vec<String>,
+        calls: std::rc::Rc<RefCell<Vec<String>>>,
+    }
 
+    impl RoutingMockHandler {
+        fn new(known_namespaces: &[&str], bare_functions: &[&str]) -> Self {
+            Self {
+                known_namespaces: known_namespaces.iter().map(|s| s.to_string()).collect(),
+                bare_functions: bare_functions.iter().map(|s| s.to_string()).collect(),
+                calls: std::rc::Rc::new(RefCell::new(Vec::new())),
+            }
+        }
 
+        fn calls(&self) -> std::rc::Rc<RefCell<Vec<String>>> {
+            self.calls.clone()
+        }
+    }
 
+    impl PluginCapability for RoutingMockHandler {
+        fn capability_name(&self) -> &'static str {
+            "function_dispatch"
+        }
+    }
+
+    impl FunctionDispatcher for RoutingMockHandler {
+        fn dispatch(&mut self, name: &str, args: &[String]) -> AwkResult<Option<String>> {
+            self.calls.borrow_mut().push(format!("dispatch:{}", name));
+            if self.bare_functions.iter().any(|f| f == name) {
+                return Ok(Some(format!("bare:{}({})", name, args.join(","))));
+            }
+            Ok(None)
+        }
+
+        fn dispatch_qualified(
+            &mut self,
+            namespace: &str,
+            function: &str,
+            args: &[String],
+        ) -> AwkResult<Option<String>> {
+            self.calls
+                .borrow_mut()
+                .push(format!("dispatch_qualified:{}.{}", namespace, function));
+            if self.known_namespaces.iter().any(|n| n == namespace)
+                && self.bare_functions.iter().any(|f| f == function)
+            {
+                return Ok(Some(format!(
+                    "ns:{}::{}({})",
+                    namespace,
+                    function,
+                    args.join(",")
+                )));
+            }
+            Ok(None)
+        }
+
+        fn has_namespace(&self, ns: &str) -> bool {
+            self.known_namespaces.iter().any(|n| n == ns)
+        }
+    }
+
+    #[test]
+    fn test_qualified_call_routes_via_dispatch_qualified() {
+        let program = parse(r#"BEGIN { print formula.sum(1, 2) }"#).unwrap();
+        let mut reader = BufferedReader::new("");
+        let mut writer = BufferedWriter::new();
+        let env = SandboxEnvironment::default();
+        let mut cmd = BlockedCommandExecutor;
+        let mut eval = Evaluator::new(&mut reader, &mut writer, &env, &mut cmd);
+        let handler = RoutingMockHandler::new(&["formula"], &["sum"]);
+        let calls = handler.calls();
+        eval.set_external_function_handler(Box::new(handler));
+        eval.execute(&program).unwrap();
+        assert_eq!(writer.output.trim(), "ns:formula::sum(1,2)");
+        assert!(calls.borrow().contains(&"dispatch_qualified:formula.sum".to_string()));
+    }
+
+    #[test]
+    fn test_qualified_call_registered_namespace_no_unqualified_fallback() {
+        // Namespace 'formula' IS registered but does not export 'sum'. The
+        // evaluator must error instead of falling back to a bare 'sum' that
+        // could resolve to a DIFFERENT plugin's function (namespace isolation,
+        // spec Section 5 T1).
+        let program = parse(r#"BEGIN { print formula.sum(1, 2) }"#).unwrap();
+        let mut reader = BufferedReader::new("");
+        let mut writer = BufferedWriter::new();
+        let env = SandboxEnvironment::default();
+        let mut cmd = BlockedCommandExecutor;
+        let mut eval = Evaluator::new(&mut reader, &mut writer, &env, &mut cmd);
+        let handler = RoutingMockHandler::new(&["formula"], &["other_fn"]);
+        let calls = handler.calls();
+        eval.set_external_function_handler(Box::new(handler));
+        let result = eval.execute(&program);
+        assert!(result.is_err(), "expected error, got output: {}", writer.output);
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("not found in namespace 'formula'"),
+            "unexpected error: {}",
+            err
+        );
+        assert!(calls.borrow().contains(&"dispatch_qualified:formula.sum".to_string()));
+        assert!(
+            !calls.borrow().contains(&"dispatch:sum".to_string()),
+            "bare fallback must not run for a registered namespace"
+        );
+    }
+
+    #[test]
+    fn test_qualified_call_unregistered_namespace_legacy_bare_fallback() {
+        // Namespace 'crypto' is NOT registered: the legacy bare-name fallback
+        // applies for plugins registered without a namespace.
+        let program = parse(r#"BEGIN { print crypto.legacy_fn(7) }"#).unwrap();
+        let mut reader = BufferedReader::new("");
+        let mut writer = BufferedWriter::new();
+        let env = SandboxEnvironment::default();
+        let mut cmd = BlockedCommandExecutor;
+        let mut eval = Evaluator::new(&mut reader, &mut writer, &env, &mut cmd);
+        let handler = RoutingMockHandler::new(&["formula"], &["legacy_fn"]);
+        let calls = handler.calls();
+        eval.set_external_function_handler(Box::new(handler));
+        eval.execute(&program).unwrap();
+        assert_eq!(writer.output.trim(), "bare:legacy_fn(7)");
+        assert!(calls.borrow().contains(&"dispatch_qualified:crypto.legacy_fn".to_string()));
+        assert!(calls.borrow().contains(&"dispatch:legacy_fn".to_string()));
+    }
+
+    #[test]
+    fn test_qualified_call_default_handler_composite_name() {
+        // Handlers without namespace support (has_namespace=false default)
+        // keep their existing behavior: dispatch_qualified's default impl
+        // builds the composite "namespace.function" name.
+        let program = parse(r#"BEGIN { print formula.sum(1, 2) }"#).unwrap();
+        let mut reader = BufferedReader::new("");
+        let mut writer = BufferedWriter::new();
+        let env = SandboxEnvironment::default();
+        let mut cmd = BlockedCommandExecutor;
+        let mut eval = Evaluator::new(&mut reader, &mut writer, &env, &mut cmd);
+        let handler = MockExternalHandler::new();
+        eval.set_external_function_handler(Box::new(handler));
+        eval.execute(&program).unwrap();
+        assert_eq!(writer.output.trim(), "MOCK_RESULT");
+    }
 
     #[test]
     fn test_collect_scope_variables_basic() {
@@ -6045,7 +6743,6 @@ mod tests {
         assert!(json.contains("hello"));
         assert!(json.contains(r#""z""#));
     }
-
 
     // --- Phase 2.4: Type bridging tests ---
 
@@ -6077,7 +6774,8 @@ mod tests {
 
     #[test]
     fn test_typeof_datetime_tag() {
-        let program = parse(r#"BEGIN { x = "@datetime:2026-08-10T14:30:00"; print typeof(x) }"#).unwrap();
+        let program =
+            parse(r#"BEGIN { x = "@datetime:2026-08-10T14:30:00"; print typeof(x) }"#).unwrap();
         let mut reader = BufferedReader::new("");
         let mut writer = BufferedWriter::new();
         let env = SandboxEnvironment::default();
@@ -6103,7 +6801,9 @@ mod tests {
 
     #[test]
     fn test_typeof_grid_tag() {
-        let program = parse(r#"BEGIN { x = "@grid:{\"cols\":[\"a\"],\"rows\":[[1]]}"; print typeof(x) }"#).unwrap();
+        let program =
+            parse(r#"BEGIN { x = "@grid:{\"cols\":[\"a\"],\"rows\":[[1]]}"; print typeof(x) }"#)
+                .unwrap();
         let mut reader = BufferedReader::new("");
         let mut writer = BufferedWriter::new();
         let env = SandboxEnvironment::default();
@@ -6126,7 +6826,6 @@ mod tests {
         assert_eq!(writer.output.trim(), "string");
     }
 
-
     // --- Security: Expression depth handling ---
 
     #[test]
@@ -6134,9 +6833,13 @@ mod tests {
         // Test that the evaluator handles moderately nested expressions.
         let depth = 30;
         let mut expr = String::new();
-        for _ in 0..depth { expr.push('('); }
+        for _ in 0..depth {
+            expr.push('(');
+        }
         expr.push('1');
-        for _ in 0..depth { expr.push(')'); }
+        for _ in 0..depth {
+            expr.push(')');
+        }
         let script = format!("BEGIN {{ x = {}; print x }}", expr);
         let output = run_awk(&script, "");
         assert_eq!(output.trim(), "1");
@@ -6155,22 +6858,28 @@ mod tests {
         }
         let json_str = serde_json::to_string(&val).unwrap();
         let result = crate::types::PropertyTree::from_json(&json_str);
-        assert!(result.is_err(), "Expected error for depth > MAX_PT_NESTING_DEPTH");
+        assert!(
+            result.is_err(),
+            "Expected error for depth > MAX_PT_NESTING_DEPTH"
+        );
     }
-
 
     #[test]
     fn test_eval_depth_limit_integration() {
         // Parser catches deep nesting at 512 before evaluator sees it
         // Use a thread with larger stack since recursive descent is stack-heavy
         let handle = std::thread::Builder::new()
-            .stack_size(16 * 1024 * 1024)
+            .stack_size(64 * 1024 * 1024)
             .spawn(|| {
                 let depth = 600;
                 let mut expr = String::new();
-                for _ in 0..depth { expr.push('('); }
+                for _ in 0..depth {
+                    expr.push('(');
+                }
                 expr.push('1');
-                for _ in 0..depth { expr.push(')'); }
+                for _ in 0..depth {
+                    expr.push(')');
+                }
                 let script = format!("BEGIN {{ x = {} }}", expr);
                 let result = crate::parser::parse(script.as_str());
                 assert!(result.is_err(), "deeply nested expr should be rejected");
@@ -6179,94 +6888,91 @@ mod tests {
         handle.join().unwrap();
     }
 
-
     // --- Phase 2: PropertyTree-Native Core tests ---
 
     #[test]
     fn test_json_object_dot_access() {
-        let output = run_awk(r#"{ print $.name, $.age }"#, r#"{"name": "Alice", "age": 30}"#);
+        let output = run_awk(
+            r#"{ print $.name, $.age }"#,
+            r#"{"name": "Alice", "age": 30}"#,
+        );
         assert_eq!(output.trim(), "Alice 30");
     }
-
 
     #[test]
     fn test_awkvalue_to_property_tree() {
         use crate::types::PropertyTree;
-        
+
         // Test Null
         let awk_null = Value::Null;
         let pt = awk_null.to_property_tree();
         assert!(pt.is_null());
-        
+
         // Test Bool
         let awk_bool = Value::Bool(true);
         let pt = awk_bool.to_property_tree();
         assert!(matches!(pt, PropertyTree::Bool(true)));
-        
+
         // Test Number (integer)
         let awk_num = Value::Number(42.0);
         let pt = awk_num.to_property_tree();
         assert!(pt.is_number());
         assert_eq!(pt.as_f64(), 42.0);
-        
+
         // Test String
         let awk_str = Value::Str("hello".to_string());
         let pt = awk_str.to_property_tree();
         assert!(pt.is_string());
         assert_eq!(pt.as_str(), "hello");
-        
+
         // Test Array
         let awk_arr = Value::Array(vec![Value::Number(1.0), Value::Number(2.0)]);
         let pt = awk_arr.to_property_tree();
         assert!(pt.is_array());
         assert_eq!(pt.len(), 2);
-        
+
         // Test Object
-        let awk_obj = Value::Object(vec![
-            ("name".to_string(), Value::Str("Alice".to_string())),
-        ]);
+        let awk_obj = Value::Object(vec![("name".to_string(), Value::Str("Alice".to_string()))]);
         let pt = awk_obj.to_property_tree();
         assert!(pt.is_object());
         assert_eq!(pt.len(), 1);
     }
-    
+
     #[test]
     fn test_property_tree_to_awkvalue() {
         use crate::types::PropertyTree;
-        
+
         // Test Null
         let pt = PropertyTree::Null;
         let awk = Value::from_property_tree(&pt);
         assert!(matches!(awk, Value::Null));
-        
+
         // Test Bool
         let pt = PropertyTree::Bool(true);
         let awk = Value::from_property_tree(&pt);
         assert!(matches!(awk, Value::Bool(true)));
-        
+
         // Test Number
         let pt = PropertyTree::integer(42);
         let awk = Value::from_property_tree(&pt);
         assert_eq!(awk.as_number(), 42.0);
-        
+
         // Test String
         let pt = PropertyTree::string("hello");
         let awk = Value::from_property_tree(&pt);
         assert_eq!(awk.as_string(), "hello");
-        
+
         // Test Array
         let pt = PropertyTree::array(vec![PropertyTree::integer(1), PropertyTree::integer(2)]);
         let awk = Value::from_property_tree(&pt);
         assert!(matches!(awk, Value::Array(_)));
-        
+
         // Test Object
-        let pt = PropertyTree::object(vec![
-            ("name".to_string(), PropertyTree::string("Alice")),
-        ]);
+        let pt = PropertyTree::object(vec![("name".to_string(), PropertyTree::string("Alice"))]);
         let awk = Value::from_property_tree(&pt);
         assert!(matches!(awk, Value::Object(_)));
     }
-    
+
     #[test]
     fn test_roundtrip_conversion() {
         // Test Value -> PropertyTree -> Value
@@ -6275,16 +6981,19 @@ mod tests {
             ("age".to_string(), Value::Number(30.0)),
             ("active".to_string(), Value::Bool(true)),
         ]);
-        
+
         let pt = original.to_property_tree();
         let roundtrip = Value::from_property_tree(&pt);
-        
+
         assert_eq!(original, roundtrip);
     }
 
     #[test]
     fn test_json_object_positional_access() {
-        let output = run_awk(r#"{ print $1, $2, $3 }"#, r#"{"name": "Alice", "age": 30, "city": "Berlin"}"#);
+        let output = run_awk(
+            r#"{ print $1, $2, $3 }"#,
+            r#"{"name": "Alice", "age": 30, "city": "Berlin"}"#,
+        );
         assert_eq!(output.trim(), "30 Berlin Alice");
     }
 
@@ -6296,13 +7005,19 @@ mod tests {
 
     #[test]
     fn test_json_nested_dot_access() {
-        let output = run_awk(r#"{ print $.address.city }"#, r#"{"name": "Alice", "address": {"city": "Berlin"}}"#);
+        let output = run_awk(
+            r#"{ print $.address.city }"#,
+            r#"{"name": "Alice", "address": {"city": "Berlin"}}"#,
+        );
         assert_eq!(output.trim(), "Berlin");
     }
 
     #[test]
     fn test_json_field_then_dot_access() {
-        let output = run_awk(r#"{ print $1.name }"#, r#"[{"name": "Alice"}, {"name": "Bob"}]"#);
+        let output = run_awk(
+            r#"{ print $1.name }"#,
+            r#"[{"name": "Alice"}, {"name": "Bob"}]"#,
+        );
         assert_eq!(output.trim(), "Alice");
     }
 
@@ -6348,8 +7063,10 @@ foo bar";
 
     #[test]
     fn test_json_typeof_fields() {
-        let output = run_awk(r#"{ print typeof($.name), typeof($.age) }"#, r#"{"name": "Alice", "age": 30}"#);
+        let output = run_awk(
+            r#"{ print typeof($.name), typeof($.age) }"#,
+            r#"{"name": "Alice", "age": 30}"#,
+        );
         assert_eq!(output.trim(), "string number");
     }
-
 }

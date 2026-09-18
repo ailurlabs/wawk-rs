@@ -21,24 +21,23 @@
 pub mod ast;
 pub mod error;
 pub mod eval;
+pub mod format_registry;
 pub mod lexer;
 pub mod parser;
 pub mod preprocessor;
 pub mod traits;
 pub mod types;
-pub mod format_registry;
 // ── Plugin subsystem ──────────────────────────────────────────────────
+pub mod namespace_registry;
 pub mod plugin_meta;
-pub mod plugin_resolver;
 pub mod plugin_registry;
-
-
+pub mod plugin_resolver;
 
 use error::AwkResult;
 use eval::Evaluator;
 use parser::parse;
 use traits::{
-    AwkCommandExecutor, AwkEnvironment, FunctionDispatcher, AwkReader, AwkWriter, IncludeResolver,
+    AwkCommandExecutor, AwkEnvironment, AwkReader, AwkWriter, FunctionDispatcher, IncludeResolver,
 };
 
 /// High-level AWK engine that encapsulates parsing and evaluation.
@@ -291,6 +290,10 @@ impl WawkEngine {
     }
 
     /// Execute an AWK script with both `@include` support and an external function handler.
+    ///
+    /// When `@plugin "name"` directives are found during preprocessing, the last
+    /// activated plugin name is set as the default namespace on the handler (if it
+    /// supports namespace configuration via `set_default_namespace`).
     #[allow(clippy::too_many_arguments)]
     pub fn execute_with_includes_and_handler(
         &self,
@@ -300,10 +303,16 @@ impl WawkEngine {
         writer: &mut dyn AwkWriter,
         env: &dyn AwkEnvironment,
         cmd: &mut dyn AwkCommandExecutor,
-        handler: Box<dyn FunctionDispatcher>,
+        mut handler: Box<dyn FunctionDispatcher>,
     ) -> AwkResult<()> {
-        let expanded = preprocessor::preprocess(script, resolver)?;
-        self.execute_with_handler(&expanded, reader, writer, env, cmd, handler)
+        let result = preprocessor::preprocess_with_meta(script, resolver)?;
+
+        // Bridge: set default namespace from the last @plugin directive
+        if let Some(last_plugin) = result.activated_plugins.last() {
+            handler.set_default_namespace(last_plugin);
+        }
+
+        self.execute_with_handler(&result.script, reader, writer, env, cmd, handler)
     }
 
     /// Parse a script without executing it. Useful for syntax checking.

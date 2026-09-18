@@ -2,18 +2,27 @@
 //!
 //! Handles:
 //! - `@include "path"` directives (gawk-compatible): expands included files
-//! - `@plugin "name"` directives: rewrites function calls to use plugin prefix
+//! - `@plugin "name"` directives: records activated plugins for runtime
+//!   namespace routing (see `PreprocessResult::activated_plugins`)
+//! - `@namespace "name"` directives: deprecated alias for `@plugin`
 //!
 //! # @plugin Directive
 //!
-//! When `@plugin "formula"` is active, unqualified function calls like `Date(...)`
-//! are rewritten to `formula_Date(...)`. This enables multi-plugin scripts where
-//! different plugins may define same-named functions without conflict.
+//! `@plugin "formula"` records the plugin for activation. The engine sets the
+//! plugin's namespace as the default on the `NamespaceRegistry` at runtime, so
+//! unqualified calls like `sum(...)` route to the plugin via namespace
+//! resolution. Qualified calls like `formula.sum(...)` route explicitly.
 //!
-//! Built-in AWK functions and user-defined functions (declared with `function`
-//! keyword) are never rewritten.
-
-use std::collections::HashSet;
+//! No compile-time text rewriting is performed: built-in functions and
+//! user-defined functions naturally take precedence in the evaluator, and
+//! unknown functions are dispatched to the external function handler, which
+//! resolves them through the `NamespaceRegistry`.
+//!
+//! # @namespace Directive (deprecated)
+//!
+//! `@namespace "formula"` is treated as an alias for `@plugin "formula"` and
+//! emits a deprecation warning comment. It will be removed in a future
+//! release.
 
 use crate::error::{AwkError, AwkResult};
 use crate::traits::IncludeResolver;
@@ -21,27 +30,25 @@ use crate::traits::IncludeResolver;
 /// Maximum include nesting depth to prevent infinite recursion.
 const MAX_INCLUDE_DEPTH: usize = 16;
 
-/// AWK built-in function names that should never be rewritten by @plugin.
-const BUILTIN_FUNCTIONS: &[&str] = &[
-    // Arithmetic
-    "atan2", "cos", "exp", "int", "log", "rand", "sin", "sqrt", "srand",
-    // String
-    "gsub", "index", "length", "match", "split", "sprintf", "sub", "substr", "tolower", "toupper",
-    // I/O
-    "close", "fflush", "getline", "next", "nextfile", "print", "printf", "system",
-    // Type/info
-    "typeof", "strftime", "mktime", "systime",
-    // Array
-    "delete", "in", "asorti", "asort",
-    // Misc
-    "and", "compl", "lshift", "or", "rshift", "xor",
-];
+/// Result of preprocessing: expanded script plus metadata about activated plugins.
+///
+/// The metadata enables the runtime to configure namespace routing based on
+/// @plugin directives encountered during preprocessing.
+#[derive(Debug, Clone)]
+pub struct PreprocessResult {
+    /// The expanded script with @include directives resolved. @plugin and
+    /// @namespace directives are emitted as comments (line numbers preserved).
+    pub script: String,
+    /// List of plugin names activated via @plugin (or deprecated @namespace)
+    /// directives, in order. The last plugin in the list is the default
+    /// namespace.
+    pub activated_plugins: Vec<String>,
+}
 
 /// Preprocess an AWK script, expanding `@include` and `@plugin` directives.
 pub fn preprocess(script: &str, resolver: &dyn IncludeResolver) -> AwkResult<String> {
-    let mut visited = HashSet::new();
-    visited.insert("<main>".to_string());
-    let expanded = expand_includes(script, resolver, &mut visited, 0)?;
+    let mut chain = vec!["<main>".to_string()];
+    let expanded = expand_includes(script, resolver, &mut chain, 0)?;
     apply_plugin_directives(&expanded)
 }
 
@@ -51,16 +58,75 @@ pub fn preprocess_named(
     source_name: &str,
     resolver: &dyn IncludeResolver,
 ) -> AwkResult<String> {
-    let mut visited = HashSet::new();
-    visited.insert(source_name.to_string());
-    let expanded = expand_includes(script, resolver, &mut visited, 0)?;
+    let mut chain = vec![source_name.to_string()];
+    let expanded = expand_includes(script, resolver, &mut chain, 0)?;
     apply_plugin_directives(&expanded)
+}
+
+/// Preprocess an AWK script, expanding `@include` and `@plugin` directives.
+/// Returns both the expanded script and metadata about activated plugins.
+pub fn preprocess_with_meta(
+    script: &str,
+    resolver: &dyn IncludeResolver,
+) -> AwkResult<PreprocessResult> {
+    let mut chain = vec!["<main>".to_string()];
+    let expanded = expand_includes(script, resolver, &mut chain, 0)?;
+    apply_plugin_directives_with_meta(&expanded)
+}
+
+/// Preprocess with a named source. Returns expanded script and plugin metadata.
+pub fn preprocess_named_with_meta(
+    script: &str,
+    source_name: &str,
+    resolver: &dyn IncludeResolver,
+) -> AwkResult<PreprocessResult> {
+    let mut chain = vec![source_name.to_string()];
+    let expanded = expand_includes(script, resolver, &mut chain, 0)?;
+    apply_plugin_directives_with_meta(&expanded)
+}
+
+/// Collect @plugin (and deprecated @namespace) directives without rewriting.
+///
+/// All other lines pass through unchanged. Directives are emitted as comments
+/// so the parser never sees them and line numbers are preserved.
+fn apply_plugin_directives_with_meta(script: &str) -> AwkResult<PreprocessResult> {
+    let mut output = String::with_capacity(script.len());
+    let mut activated_plugins: Vec<String> = Vec::new();
+
+    for line in script.lines() {
+        let trimmed = line.trim();
+
+        // Deprecated @namespace directive: treat as @plugin alias
+        if let Some(ns_name) = parse_namespace_directive(trimmed) {
+            activated_plugins.push(ns_name.clone());
+            output.push_str(&format!(
+                "# DEPRECATED: @namespace \"{}\" — use @plugin \"{}\" instead\n",
+                ns_name, ns_name
+            ));
+            continue;
+        }
+
+        // @plugin directive: record for runtime namespace routing
+        if let Some(plugin_name) = parse_plugin_directive(trimmed) {
+            activated_plugins.push(plugin_name.clone());
+            output.push_str(&format!("# @plugin \"{}\"\n", plugin_name));
+            continue;
+        }
+
+        output.push_str(line);
+        output.push('\n');
+    }
+
+    Ok(PreprocessResult {
+        script: output,
+        activated_plugins,
+    })
 }
 
 fn expand_includes(
     script: &str,
     resolver: &dyn IncludeResolver,
-    visited: &mut HashSet<String>,
+    chain: &mut Vec<String>,
     depth: usize,
 ) -> AwkResult<String> {
     if depth > MAX_INCLUDE_DEPTH {
@@ -79,21 +145,32 @@ fn expand_includes(
         // would appear on its own line starting with @include, which would not be
         // valid AWK string syntax. Line-by-line processing is sufficient.
         if let Some(path) = parse_include_directive(trimmed) {
-            if visited.contains(path) {
-                output.push_str("# @include \"");
-                output.push_str(path);
-                output.push_str("\" (already included)\n");
-                continue;
+            // E1: Cycle detection — check if path is already in the current include chain.
+            // This detects cycles at any depth and reports the full cycle path.
+            if let Some(cycle_start) = chain.iter().position(|p| p == path) {
+                let cycle_path: Vec<&str> = chain[cycle_start..].iter().map(|s| s.as_str()).collect();
+                let mut cycle_desc = cycle_path.join(" -> ");
+                cycle_desc.push_str(" -> ");
+                cycle_desc.push_str(path);
+                return Err(AwkError::RuntimeError(format!(
+                    "@include cycle detected: {}",
+                    cycle_desc
+                )));
             }
 
-            visited.insert(path.to_string());
+            // Push onto chain (backtracking: removed after processing)
+            chain.push(path.to_string());
 
             let content = resolver.resolve(path)?;
-            let expanded = expand_includes(&content, resolver, visited, depth + 1)?;
+            let expanded = expand_includes(&content, resolver, chain, depth + 1)?;
             output.push_str(&expanded);
             if !expanded.ends_with('\n') {
                 output.push('\n');
             }
+
+            // Backtrack: remove from chain so diamond patterns work
+            // (A→B→D and A→C→D is OK — D is processed twice)
+            chain.pop();
         } else {
             output.push_str(line);
             output.push('\n');
@@ -103,192 +180,56 @@ fn expand_includes(
     Ok(output)
 }
 
-/// Apply @plugin directive rewriting.
-///
-/// Two-pass approach:
-/// 1. Collect user-defined function names (from `function` keyword)
-/// 2. Rewrite function calls based on active @plugin binding
+/// Apply @plugin directive handling (no rewriting, backward-compatible API).
 fn apply_plugin_directives(script: &str) -> AwkResult<String> {
-    // Pass 1: collect user-defined function names
-    let user_fns = collect_user_functions(script);
-
-    // Build built-in set
-    let builtin_set: HashSet<&str> = BUILTIN_FUNCTIONS.iter().copied().collect();
-
-    // Pass 2: process @plugin directives and rewrite function calls
-    let mut output = String::with_capacity(script.len());
-    let mut current_plugin: Option<String> = None;
-
-    for line in script.lines() {
-        let trimmed = line.trim();
-
-        // Check for @plugin directive
-        if let Some(plugin_name) = parse_plugin_directive(trimmed) {
-            current_plugin = Some(plugin_name);
-            // Emit as comment (preserves line numbering)
-            output.push_str("# @plugin set\n");
-            continue;
-        }
-
-        // If no plugin active, pass through unchanged
-        let Some(ref plugin) = current_plugin else {
-            output.push_str(line);
-            output.push('\n');
-            continue;
-        };
-
-        // Rewrite function calls in this line
-        let rewritten = rewrite_line_with_plugin_prefix(line, plugin, &builtin_set, &user_fns);
-        output.push_str(&rewritten);
-        output.push('\n');
-    }
-
-    Ok(output)
+    apply_plugin_directives_with_meta(script).map(|result| result.script)
 }
 
-/// Collect all user-defined function names from the script.
-fn collect_user_functions(script: &str) -> HashSet<String> {
-    let mut fns = HashSet::new();
-    for line in script.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("function") {
-            if let Some(rest) = rest.strip_prefix(|c: char| c.is_ascii_whitespace()) {
-                // Extract function name (up to '(')
-                let name = rest.trim_start().split('(').next().unwrap_or("").trim();
-                if !name.is_empty() && is_valid_identifier(name) {
-                    fns.insert(name.to_string());
-                }
+/// Parse `@namespace "name"` directive (deprecated). Returns the namespace name.
+fn parse_namespace_directive(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("@namespace")?;
+    if !rest.starts_with(|c: char| c.is_ascii_whitespace()) {
+        return None;
+    }
+    let rest = rest.trim();
+    if rest.starts_with('"') && rest.len() >= 2 {
+        let inner = &rest[1..];
+        if let Some(end) = inner.find('"') {
+            let name = &inner[..end];
+            if !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                return Some(name.to_string());
             }
         }
     }
-    fns
-}
-
-/// Check if a string is a valid AWK identifier.
-fn is_valid_identifier(s: &str) -> bool {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    None
 }
 
 /// Parse `@plugin "name"` directive. Returns the plugin name.
 fn parse_plugin_directive(line: &str) -> Option<String> {
     let rest = line.strip_prefix("@plugin")?;
-
-    // Must be followed by whitespace
     if !rest.starts_with(|c: char| c.is_ascii_whitespace()) {
         return None;
     }
-
     let rest = rest.trim();
-
-    // Extract quoted name
-    if rest.starts_with('"') && rest.len() >= 2 {
+    if rest.starts_with('"') {
         let inner = &rest[1..];
         if let Some(end) = inner.find('"') {
             let name = &inner[..end];
-            if !name.is_empty() {
-                // Validate plugin name: only alphanumeric, hyphens, underscores
-                if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-                    return None;
-                }
+            // Validate plugin name: only alphanumeric, hyphens, underscores
+            if !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
                 return Some(name.to_string());
             }
         }
     }
-
     None
-}
-
-/// Rewrite function calls in a line to add plugin prefix.
-///
-/// Only rewrites identifiers that:
-/// - Are followed by `(` (function call syntax)
-/// - Are not AWK built-in functions
-/// - Are not user-defined functions
-/// - Are not inside string literals
-/// - Don't already have the plugin prefix
-fn rewrite_line_with_plugin_prefix(
-    line: &str,
-    plugin: &str,
-    builtins: &HashSet<&str>,
-    user_fns: &HashSet<String>,
-) -> String {
-    let prefix = format!("{}_", plugin);
-    let mut result = String::with_capacity(line.len() + 16);
-    let chars: Vec<char> = line.chars().collect();
-    let len = chars.len();
-    let mut i = 0;
-    let mut in_string = false;
-
-    while i < len {
-        let c = chars[i];
-
-        // Track string literals (don't rewrite inside strings)
-        if c == '"' {
-            // Count consecutive backslashes before this quote
-            let mut backslash_count = 0;
-            let mut k = i;
-            while k > 0 {
-                k -= 1;
-                if chars[k] == '\\' {
-                    backslash_count += 1;
-                } else {
-                    break;
-                }
-            }
-            if backslash_count % 2 == 0 {
-                // Even backslashes = quote is NOT escaped, toggle string state
-                in_string = !in_string;
-            }
-            result.push(c);
-            i += 1;
-            continue;
-        }
-
-        if in_string {
-            result.push(c);
-            i += 1;
-            continue;
-        }
-
-        // Check for identifier followed by '('
-        if c.is_ascii_alphabetic() || c == '_' {
-            let start = i;
-            while i < len && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
-                i += 1;
-            }
-            let ident: String = chars[start..i].iter().collect();
-
-            // Skip whitespace after identifier
-            let mut j = i;
-            while j < len && chars[j].is_ascii_whitespace() {
-                j += 1;
-            }
-
-            // Check if followed by '('
-            if j < len && chars[j] == '(' {
-                // It's a function call — check if it should be rewritten
-                let is_builtin = builtins.contains(ident.as_str());
-                let is_user_fn = user_fns.contains(&ident);
-                let already_prefixed = ident.starts_with(&prefix);
-
-                if !is_builtin && !is_user_fn && !already_prefixed {
-                    result.push_str(&prefix);
-                }
-            }
-
-            result.push_str(&ident);
-        } else {
-            result.push(c);
-            i += 1;
-        }
-    }
-
-    result
 }
 
 /// Parse an `@include "path"` directive from a line.
@@ -323,7 +264,9 @@ mod tests {
 
     impl MapResolver {
         fn new() -> Self {
-            Self { files: HashMap::new() }
+            Self {
+                files: HashMap::new(),
+            }
         }
 
         fn add(&mut self, path: &str, content: &str) -> &mut Self {
@@ -341,7 +284,7 @@ mod tests {
         }
     }
 
-    // ---- @include tests (preserved from original) ----
+    // ---- @include tests ----
 
     #[test]
     fn test_no_includes() {
@@ -378,15 +321,75 @@ mod tests {
     }
 
     #[test]
-    fn test_circular_include_is_idempotent() {
+    fn test_direct_cycle_detected() {
+        // E1-T1: Direct cycle: A includes A → error
+        let mut resolver = MapResolver::new();
+        resolver.add("a.awk", "@include \"a.awk\"\nfunction fa() { return 1 }");
+
+        let script = "@include \"a.awk\"";
+        let result = preprocess(script, &resolver);
+        assert!(result.is_err(), "direct cycle should be detected");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("cycle detected"), "error should mention cycle: {}", err);
+        assert!(err.contains("a.awk"), "error should include file name: {}", err);
+    }
+
+    #[test]
+    fn test_indirect_cycle_detected() {
+        // E1-T2: Indirect cycle: A→B→C→A → error with full path
         let mut resolver = MapResolver::new();
         resolver.add("a.awk", "@include \"b.awk\"\nfunction fa() { return 1 }");
-        resolver.add("b.awk", "@include \"a.awk\"\nfunction fb() { return 2 }");
+        resolver.add("b.awk", "@include \"c.awk\"\nfunction fb() { return 2 }");
+        resolver.add("c.awk", "@include \"a.awk\"\nfunction fc() { return 3 }");
 
-        let script = "@include \"a.awk\"\nBEGIN { print fa(), fb() }";
-        let result = preprocess(script, &resolver).unwrap();
-        assert!(result.contains("function fa()"));
-        assert!(result.contains("function fb()"));
+        let script = "@include \"a.awk\"";
+        let result = preprocess(script, &resolver);
+        assert!(result.is_err(), "indirect cycle should be detected");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("cycle detected"), "error should mention cycle: {}", err);
+        assert!(err.contains("a.awk -> b.awk -> c.awk -> a.awk"), 
+                "error should include full cycle path: {}", err);
+    }
+
+    #[test]
+    fn test_diamond_pattern_ok() {
+        // E1-T3: Diamond (non-cycle): A→B, A→C, B→D, C→D → OK (D processed twice)
+        let mut resolver = MapResolver::new();
+        resolver.add("d.awk", "function fd() { return 4 }");
+        resolver.add("b.awk", "@include \"d.awk\"\nfunction fb() { return 2 }");
+        resolver.add("c.awk", "@include \"d.awk\"\nfunction fc() { return 3 }");
+        resolver.add("a.awk", "@include \"b.awk\"\n@include \"c.awk\"\nfunction fa() { return 1 }");
+
+        let script = "@include \"a.awk\"\nBEGIN { print fa() }";
+        let result = preprocess(script, &resolver);
+        assert!(result.is_ok(), "diamond pattern should not be treated as cycle: {:?}", result.err());
+        let expanded = result.unwrap();
+        // D should appear twice (once via B, once via C)
+        assert_eq!(expanded.matches("function fd()").count(), 2, 
+                   "D should be processed twice in diamond pattern");
+        assert!(expanded.contains("function fb()"));
+        assert!(expanded.contains("function fc()"));
+    }
+
+    #[test]
+    fn test_deep_nesting_no_cycle() {
+        // E1-T4: Deep nesting: A→B→C→D→E (no cycle) → OK
+        let mut resolver = MapResolver::new();
+        resolver.add("e.awk", "function fe() { return 5 }");
+        resolver.add("d.awk", "@include \"e.awk\"\nfunction fd() { return 4 }");
+        resolver.add("c.awk", "@include \"d.awk\"\nfunction fc() { return 3 }");
+        resolver.add("b.awk", "@include \"c.awk\"\nfunction fb() { return 2 }");
+        resolver.add("a.awk", "@include \"b.awk\"\nfunction fa() { return 1 }");
+
+        let script = "@include \"a.awk\"";
+        let result = preprocess(script, &resolver);
+        assert!(result.is_ok(), "deep nesting without cycle should succeed: {:?}", result.err());
+        let expanded = result.unwrap();
+        assert!(expanded.contains("function fa()"));
+        assert!(expanded.contains("function fb()"));
+        assert!(expanded.contains("function fc()"));
+        assert!(expanded.contains("function fd()"));
+        assert!(expanded.contains("function fe()"));
     }
 
     #[test]
@@ -415,7 +418,10 @@ mod tests {
 
     #[test]
     fn test_parse_include_directive() {
-        assert_eq!(parse_include_directive("@include \"foo.awk\""), Some("foo.awk"));
+        assert_eq!(
+            parse_include_directive("@include \"foo.awk\""),
+            Some("foo.awk")
+        );
         assert_eq!(parse_include_directive("@include"), None);
         assert_eq!(parse_include_directive("@include \"\""), None);
         assert_eq!(parse_include_directive("@includefile \"x\""), None);
@@ -439,95 +445,80 @@ mod tests {
     }
 
     #[test]
-    fn test_plugin_rewrites_function_calls() {
+    fn test_plugin_passthrough_no_rewriting() {
         let resolver = MapResolver::new();
-        let script = "@plugin \"formula\"\nBEGIN { x = Date(2024, 1, 1) }";
+        let script = "@plugin \"formula\"\nBEGIN { x = sum(1, 2) }";
         let result = preprocess(script, &resolver).unwrap();
-        assert!(result.contains("formula_Date(2024, 1, 1)"), "got: {}", result);
+        // Function calls pass through unchanged — routing happens at runtime
+        assert!(result.contains("x = sum(1, 2)"), "got: {}", result);
+        assert!(!result.contains("formula_sum"), "got: {}", result);
+        // Directive is emitted as a comment
+        assert!(result.contains("# @plugin \"formula\""), "got: {}", result);
     }
 
     #[test]
-    fn test_plugin_does_not_rewrite_builtins() {
+    fn test_plugin_records_activated_plugins() {
         let resolver = MapResolver::new();
-        let script = "@plugin \"formula\"\nBEGIN { print length(\"hello\") }";
-        let result = preprocess(script, &resolver).unwrap();
-        // print and length should NOT be prefixed
-        assert!(result.contains("print length("), "got: {}", result);
-        assert!(!result.contains("formula_print"), "got: {}", result);
-        assert!(!result.contains("formula_length"), "got: {}", result);
+        let script = "@plugin \"formula\"\nBEGIN { x = sum(1, 2) }";
+        let result = preprocess_with_meta(script, &resolver).unwrap();
+        assert_eq!(result.activated_plugins, vec!["formula"]);
     }
 
     #[test]
-    fn test_plugin_does_not_rewrite_user_functions() {
+    fn test_multiple_plugins_recorded_in_order() {
         let resolver = MapResolver::new();
-        let script = "function myHelper(x) { return x + 1 }\n@plugin \"formula\"\nBEGIN { print myHelper(5) }";
-        let result = preprocess(script, &resolver).unwrap();
-        assert!(result.contains("myHelper(5)"), "got: {}", result);
-        assert!(!result.contains("formula_myHelper"), "got: {}", result);
-    }
-
-    #[test]
-    fn test_plugin_scoping() {
-        let resolver = MapResolver::new();
-        let script = "@plugin \"formula\"\nBEGIN { x = Date(2024,1,1) }\n@plugin \"cel\"\nBEGIN { y = eval(\"1+1\") }";
-        let result = preprocess(script, &resolver).unwrap();
-        assert!(result.contains("formula_Date("), "got: {}", result);
-        assert!(result.contains("cel_eval("), "got: {}", result);
-        // Ensure cross-contamination doesn't happen
-        assert!(!result.contains("cel_Date("), "got: {}", result);
-        assert!(!result.contains("formula_eval("), "got: {}", result);
+        let script = "@plugin \"formula\"\nBEGIN { x = sum(1) }\n@plugin \"cel\"\nBEGIN { y = eval(\"1+1\") }";
+        let result = preprocess_with_meta(script, &resolver).unwrap();
+        assert_eq!(result.activated_plugins, vec!["formula", "cel"]);
+        assert!(result.script.contains("# @plugin \"formula\""), "got: {}", result.script);
+        assert!(result.script.contains("# @plugin \"cel\""), "got: {}", result.script);
     }
 
     #[test]
     fn test_no_plugin_passthrough() {
         let resolver = MapResolver::new();
-        let script = "BEGIN { x = Date(2024,1,1) }";
+        let script = "BEGIN { x = sum(1,2) }";
         let result = preprocess(script, &resolver).unwrap();
-        // Without @plugin, no rewriting
-        assert!(result.contains("Date(2024,1,1)"), "got: {}", result);
-        assert!(!result.contains("formula_Date"), "got: {}", result);
+        assert_eq!(result, "BEGIN { x = sum(1,2) }\n");
+        let meta = preprocess_with_meta(script, &resolver).unwrap();
+        assert!(meta.activated_plugins.is_empty());
+    }
+
+    // ---- @namespace directive (deprecated) tests ----
+
+    #[test]
+    fn test_parse_namespace_directive() {
+        assert_eq!(
+            parse_namespace_directive("@namespace \"formula\""),
+            Some("formula".to_string())
+        );
+        assert_eq!(
+            parse_namespace_directive("@namespace \"my_ns\""),
+            Some("my_ns".to_string())
+        );
+        assert_eq!(parse_namespace_directive("@namespace \"\""), None);
+        assert_eq!(parse_namespace_directive("@namespace"), None);
+        assert_eq!(parse_namespace_directive("@namespacefoo \"x\""), None);
     }
 
     #[test]
-    fn test_plugin_does_not_rewrite_inside_strings() {
+    fn test_namespace_deprecated_treated_as_plugin() {
         let resolver = MapResolver::new();
-        let script = "@plugin \"formula\"\nBEGIN { print \"Date(2024)\" }";
-        let result = preprocess(script, &resolver).unwrap();
-        // Date inside a string should NOT be rewritten
-        assert!(result.contains("\"Date(2024)\""), "got: {}", result);
-    }
-
-    #[test]
-    fn test_plugin_already_prefixed_not_doubled() {
-        let resolver = MapResolver::new();
-        let script = "@plugin \"formula\"\nBEGIN { x = formula_Date(2024,1,1) }";
-        let result = preprocess(script, &resolver).unwrap();
-        // Should NOT become formula_formula_Date
-        assert!(result.contains("formula_Date("), "got: {}", result);
-        assert!(!result.contains("formula_formula_"), "got: {}", result);
-    }
-
-    #[test]
-    fn test_collect_user_functions() {
-        let script = "function foo(x) { return x }\nfunction bar(a, b) { return a + b }\nBEGIN { print foo(1) }";
-        let fns = collect_user_functions(script);
-        assert!(fns.contains("foo"));
-        assert!(fns.contains("bar"));
-        assert!(!fns.contains("print"));
+        let script = "@namespace \"formula\"\nBEGIN { x = sum(1, 2) }";
+        let result = preprocess_with_meta(script, &resolver).unwrap();
+        // Treated as @plugin alias: recorded for namespace routing
+        assert_eq!(result.activated_plugins, vec!["formula"]);
+        // Deprecation warning emitted
+        assert!(
+            result.script.contains("DEPRECATED: @namespace \"formula\""),
+            "got: {}",
+            result.script
+        );
+        // Function calls pass through unchanged
+        assert!(result.script.contains("x = sum(1, 2)"), "got: {}", result.script);
     }
 
     // ---- Security-focused tests ----
-
-    #[test]
-    fn test_escaped_quote_handling() {
-        let builtins: HashSet<&str> = HashSet::new();
-        let user_fns: HashSet<String> = HashSet::new();
-        // \\" means escaped backslash followed by real quote
-        let line = r#"x = "test\\"; Date(2024)"#;
-        let result = rewrite_line_with_plugin_prefix(line, "formula", &builtins, &user_fns);
-        // Date after the string should be rewritten
-        assert!(result.contains("formula_Date"), "got: {}", result);
-    }
 
     #[test]
     fn test_plugin_name_validation() {
@@ -543,22 +534,22 @@ mod tests {
     }
 
     #[test]
-    fn test_double_backslash_string_boundary() {
-        let builtins: HashSet<&str> = HashSet::new();
-        let user_fns: HashSet<String> = HashSet::new();
-        // String with escaped backslash at end: "test\\"
-        // The quote after \ is a REAL quote (not escaped)
-        let line = r#"print "test\\"; Foo(1)"#;
-        let result = rewrite_line_with_plugin_prefix(line, "p", &builtins, &user_fns);
-        // Foo is outside string, should be rewritten
-        assert!(result.contains("p_Foo"), "got: {}", result);
-    }
-
-    #[test]
     fn test_plugin_directive_rejects_special_chars() {
         assert!(parse_plugin_directive("@plugin \"foo.bar\"").is_none());
         assert!(parse_plugin_directive("@plugin \"foo bar\"").is_none());
         assert!(parse_plugin_directive("@plugin \"foo/bar\"").is_none());
         assert!(parse_plugin_directive("@plugin \"\"").is_none());
+    }
+
+    #[test]
+    fn test_include_expansion_before_plugin_collection() {
+        // @plugin inside an included file is collected (T6 scenario)
+        let mut resolver = MapResolver::new();
+        resolver.add("helper.awk", "@plugin \"cel\"\nfunction helper() { return 1 }");
+
+        let script = "@plugin \"formula\"\n@include \"helper.awk\"\nBEGIN { print helper() }";
+        let result = preprocess_with_meta(script, &resolver).unwrap();
+        // Expansion order: formula first, then cel from helper.awk (last wins)
+        assert_eq!(result.activated_plugins, vec!["formula", "cel"]);
     }
 }

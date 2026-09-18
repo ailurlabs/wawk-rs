@@ -21,7 +21,8 @@ use wawk_core::error::AwkResult;
 use wawk_core::lexer::Lexer;
 use wawk_core::parser::parse;
 use wawk_core::traits::{
-    FunctionDispatcher, PluginCapability, MemReader, MemWriter, StubCommandExecutor, StubEnvironment,
+    BlockedCommandExecutor, BufferedReader, BufferedWriter, FunctionDispatcher, PluginCapability,
+    SandboxEnvironment,
 };
 use wawk_core::WawkEngine;
 
@@ -109,10 +110,10 @@ END {
 
 fn run_awk_script(script: &str, input: &str) {
     let engine = WawkEngine::new();
-    let mut reader = MemReader::new(input);
-    let mut writer = MemWriter::new();
-    let env = StubEnvironment::default();
-    let mut cmd = StubCommandExecutor;
+    let mut reader = BufferedReader::new(input);
+    let mut writer = BufferedWriter::new();
+    let env = SandboxEnvironment::default();
+    let mut cmd = BlockedCommandExecutor;
     engine
         .execute(black_box(script), &mut reader, &mut writer, &env, &mut cmd)
         .expect("benchmark script should not fail");
@@ -251,7 +252,9 @@ fn bench_parser(c: &mut Criterion) {
 struct MockExternalHandler;
 
 impl PluginCapability for MockExternalHandler {
-    fn capability_name(&self) -> &'static str { "function_dispatch" }
+    fn capability_name(&self) -> &'static str {
+        "function_dispatch"
+    }
 }
 
 impl FunctionDispatcher for MockExternalHandler {
@@ -276,10 +279,10 @@ fn bench_plugin_dispatch(c: &mut Criterion) {
             || {
                 // Setup: create fresh engine, reader, writer per iteration batch
                 let engine = WawkEngine::new();
-                let reader = MemReader::new(&data);
-                let writer = MemWriter::new();
-                let env = StubEnvironment::default();
-                let cmd = StubCommandExecutor;
+                let reader = BufferedReader::new(&data);
+                let writer = BufferedWriter::new();
+                let env = SandboxEnvironment::default();
+                let cmd = BlockedCommandExecutor;
                 (engine, reader, writer, env, cmd)
             },
             |(engine, mut reader, mut writer, env, mut cmd)| {

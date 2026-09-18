@@ -1,33 +1,17 @@
-//! wawk-wasi — Pure WASI wrapper for wawk-core.
+//! wawk-wasi — WASM component CLI for wawk-core.
 //!
-//! A sandboxed Wasm module: reads AWK from stdin, writes output to stdout.
-//! Runs under any WASI-compatible runtime (wasmtime, wasmer, wasm3, etc.).
-//!
-//! # Features
-//!
-//! - **`plugins`**: When enabled, imports a `wawk_plugin_call` host function
-//!   from the `"wawk"` import module. The host (e.g. wasmtime) must provide
-//!   this function. When running under a basic WASI runtime without the host
-//!   function, build without the `plugins` feature (the default).
-//!
-//! # Protocol
-//!
-//! ## Single-script mode (default, streaming):
-//! - **stdin line 1**: The AWK script
-//! - **stdin lines 2+**: Input data (streamed line-by-line)
-//!
-//! ## Multi-script mode:
-//! When the first line is exactly `---wawk-multi---`, multiple scripts can be
-//! provided separated by `---SCRIPT---` markers, with input data after
-//! `---INPUT---`. This mode buffers all input.
+//! A WASM component composable with WIT plugins via `wac plug`.
+//! Runs under wasmtime with full WASI support.
 //!
 //! # Usage
 //! ```bash
-//! printf '{ sum += $1 } END { print sum }\n1\n2\n3\n' | wasmtime wawk.wasm
-//! ```
+//! # Bare mode
+//! wasmtime run wawk_wasi.wasm -- -e 'BEGIN { print "hello" }'
 //!
-//! Large inputs are streamed — only the script and one line of data are
-//! in memory at a time.
+//! # With plugins
+//! wac plug --plug wawk-hello.wasm wawk_wasi.wasm -o composed.wasm
+//! wasmtime run composed.wasm -- -e 'BEGIN { print greet("world") }'
+//! ```
 
 use std::io::{self, BufRead, Read, Write};
 
@@ -36,112 +20,36 @@ use wawk_core::eval::Evaluator;
 use wawk_core::parser;
 use wawk_core::preprocessor;
 use wawk_core::traits::{
-    AwkCommandExecutor, AwkEnvironment, AwkReader, AwkWriter, IncludeResolver,
+    AwkCommandExecutor, AwkEnvironment, AwkReader, AwkWriter, FunctionDispatcher, IncludeResolver,
+    PluginCapability,
 };
 
-#[cfg(feature = "plugins")]
-use wawk_core::error::AwkError;
-#[cfg(feature = "plugins")]
-use wawk_core::traits::{FunctionDispatcher, PluginCapability};
+wit_bindgen::generate!({
+    world: "cli-runner",
+    path: "wit",
+    generate_all,
+});
 
 /// Maximum script size: 1 MB.
 const MAX_SCRIPT_SIZE: usize = 1_048_576;
 
 // ============================================================================
-// WIT Plugin Host Function Import (feature-gated)
+// WIT Plugin Dispatcher
 // ============================================================================
 
-#[cfg(feature = "plugins")]
-mod plugin_dispatch {
-    use super::*;
+struct WitPluginDispatcher;
 
-    // Host-provided plugin dispatch function.
-    //
-    // The host (wasmtime or another WASM runtime) provides this function.
-    // It receives:
-    // - `name_ptr`, `name_len`: the external function name (UTF-8)
-    // - `args_ptr`, `args_len`: serialized arguments (each arg is a
-    //   4-byte little-endian length prefix followed by UTF-8 bytes,
-    //   concatenated)
-    // - `result_ptr`, `result_capacity`: buffer where the host writes
-    //   the result string (if any)
-    //
-    // Returns:
-    // - `0` if no plugin handles the function
-    // - `1` if a plugin handled it (result written to result_ptr as
-    //   4-byte LE length + UTF-8 bytes)
-    #[link(wasm_import_module = "wawk")]
-    extern "C" {
-        fn wawk_plugin_call(
-            name_ptr: i32,
-            name_len: i32,
-            args_ptr: i32,
-            args_len: i32,
-            result_ptr: i32,
-            result_capacity: i32,
-        ) -> i32;
+impl PluginCapability for WitPluginDispatcher {
+    fn capability_name(&self) -> &'static str {
+        "wit_function_dispatch"
     }
+}
 
-    /// Dispatcher that calls the host-provided `wawk_plugin_call` function.
-    pub struct HostPluginDispatcher;
-
-    impl PluginCapability for HostPluginDispatcher {
-        fn capability_name(&self) -> &'static str { "function_dispatch" }
-    }
-
-    impl FunctionDispatcher for HostPluginDispatcher {
-        fn dispatch(&mut self, name: &str, args: &[String]) -> AwkResult<Option<String>> {
-            // Serialize args: for each arg, write [len: u32 LE][bytes]
-            let mut args_buf: Vec<u8> = Vec::new();
-            for arg in args {
-                let bytes = arg.as_bytes();
-                args_buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-                args_buf.extend_from_slice(bytes);
-            }
-
-            // Result buffer: up to 64 KB
-            let result_capacity: usize = 64 * 1024;
-            let mut result_buf: Vec<u8> = vec![0u8; result_capacity];
-
-            let ret = unsafe {
-                wawk_plugin_call(
-                    name.as_ptr() as i32,
-                    name.len() as i32,
-                    if args_buf.is_empty() {
-                        0
-                    } else {
-                        args_buf.as_ptr() as i32
-                    },
-                    args_buf.len() as i32,
-                    result_buf.as_mut_ptr() as i32,
-                    result_capacity as i32,
-                )
-            };
-
-            if ret == 0 {
-                // No plugin handled this function
-                return Ok(None);
-            }
-
-            // Read result: first 4 bytes are the string length (LE u32),
-            // followed by the UTF-8 string bytes.
-            if result_buf.len() < 4 {
-                return Err(AwkError::RuntimeError(
-                    "plugin result buffer too small".to_string(),
-                ));
-            }
-            let str_len =
-                u32::from_le_bytes([result_buf[0], result_buf[1], result_buf[2], result_buf[3]])
-                    as usize;
-            if str_len + 4 > result_capacity {
-                return Err(AwkError::RuntimeError(
-                    "plugin result exceeds buffer capacity".to_string(),
-                ));
-            }
-            let result_str = String::from_utf8(result_buf[4..4 + str_len].to_vec())
-                .map_err(|_| AwkError::RuntimeError("plugin returned invalid UTF-8".to_string()))?;
-
-            Ok(Some(result_str))
+impl FunctionDispatcher for WitPluginDispatcher {
+    fn dispatch(&mut self, name: &str, args: &[String]) -> AwkResult<Option<String>> {
+        match crate::wawk::plugins::external_functions::call(name, args) {
+            Some(result) => Ok(Some(result)),
+            None => Ok(None),
         }
     }
 }
@@ -219,13 +127,13 @@ impl AwkCommandExecutor for BlockedCommandExecutor {
 
     fn read_pipe_line(&mut self, _cmd: &str) -> AwkResult<Option<String>> {
         Err(wawk_core::error::AwkError::RuntimeError(
-            "command pipes are not available in the WASM sandbox".to_string()
+            "command pipes are not available in the WASM sandbox".to_string(),
         ))
     }
 
     fn write_pipe(&mut self, _cmd: &str, _output: &str) -> AwkResult<()> {
         Err(wawk_core::error::AwkError::RuntimeError(
-            "command pipes are not available in the WASM sandbox".to_string()
+            "command pipes are not available in the WASM sandbox".to_string(),
         ))
     }
 }
@@ -260,14 +168,7 @@ impl IncludeResolver for FsIncludeResolver {
 // ============================================================================
 
 fn configure_eval(eval: &mut Evaluator<'_>) {
-    #[cfg(feature = "plugins")]
-    {
-        eval.set_external_function_handler(Box::new(plugin_dispatch::HostPluginDispatcher));
-    }
-    #[cfg(not(feature = "plugins"))]
-    {
-        let _ = eval;
-    }
+    eval.set_external_function_handler(Box::new(WitPluginDispatcher));
 }
 
 // ============================================================================
@@ -393,7 +294,26 @@ fn parse_args(args: &[String]) -> CliArgs {
 // Main
 // ============================================================================
 
-fn main() {
+// ============================================================================
+// WASM Component Export
+// ============================================================================
+
+struct WawkCli;
+
+impl exports::wasi::cli::run::Guest for WawkCli {
+    fn run() -> Result<(), ()> {
+        main_inner();
+        Ok(())
+    }
+}
+
+export!(WawkCli);
+
+// ============================================================================
+// CLI Entry Point
+// ============================================================================
+
+fn main_inner() {
     let args: Vec<String> = std::env::args().collect();
     let cli = parse_args(&args);
 
@@ -515,10 +435,12 @@ fn run_single(program_str: &str, vars: &[(String, String)], field_separator: &Op
 
     // Read all stdin into memory for processing
     let mut stdin_content = String::new();
-    io::stdin().read_to_string(&mut stdin_content).unwrap_or_else(|e| {
-        eprintln!("wawk: error reading stdin: {}", e);
-        std::process::exit(1);
-    });
+    io::stdin()
+        .read_to_string(&mut stdin_content)
+        .unwrap_or_else(|e| {
+            eprintln!("wawk: error reading stdin: {}", e);
+            std::process::exit(1);
+        });
 
     let mut reader = wawk_core::traits::SliceReader::new(stdin_content);
     let mut writer = StreamWriter::new();
@@ -527,7 +449,6 @@ fn run_single(program_str: &str, vars: &[(String, String)], field_separator: &Op
     let mut eval = Evaluator::new(&mut reader, &mut writer, &env, &mut cmd);
 
     configure_eval(&mut eval);
-
 
     for (k, v) in vars {
         eval.set_variable(k.clone(), v.clone());
@@ -541,11 +462,15 @@ fn run_single(program_str: &str, vars: &[(String, String)], field_separator: &Op
         std::process::exit(1);
     }
     io::stdout().flush().ok();
-
 }
 
 /// Run with input files from WASI filesystem.
-fn run_with_files(program_str: &str, vars: &[(String, String)], input_files: &[String], field_separator: &Option<String>) {
+fn run_with_files(
+    program_str: &str,
+    vars: &[(String, String)],
+    input_files: &[String],
+    field_separator: &Option<String>,
+) {
     let resolver = FsIncludeResolver;
     let expanded = match preprocessor::preprocess(program_str, &resolver) {
         Ok(s) => s,
@@ -614,7 +539,6 @@ fn run_with_files(program_str: &str, vars: &[(String, String)], input_files: &[S
         std::process::exit(1);
     }
     io::stdout().flush().ok();
-
 }
 
 /// Run in streaming mode: script is known, data streams from stdin.
@@ -1094,7 +1018,6 @@ fn parse_multi_script(all_input: &str, max_size: usize) -> (String, String) {
     (combined, input_data)
 }
 
-
 // ============================================================================
 // Unit tests
 // ============================================================================
@@ -1274,10 +1197,7 @@ mod tests {
 
     #[test]
     fn test_reader_multi_file() {
-        let mut reader = make_reader(vec![
-            ("a.txt", "a1\na2\n"),
-            ("b.txt", "b1\n"),
-        ]);
+        let mut reader = make_reader(vec![("a.txt", "a1\na2\n"), ("b.txt", "b1\n")]);
         // Read from first file
         assert_eq!(reader.read_line().unwrap(), Some("a1".to_string()));
         assert_eq!(reader.read_line().unwrap(), Some("a2".to_string()));
@@ -1302,10 +1222,7 @@ mod tests {
 
     #[test]
     fn test_reader_open_file_by_name() {
-        let mut reader = make_reader(vec![
-            ("first.txt", "f1\n"),
-            ("second.txt", "s1\ns2\n"),
-        ]);
+        let mut reader = make_reader(vec![("first.txt", "f1\n"), ("second.txt", "s1\ns2\n")]);
         // Open second file directly
         reader.open_file_by_name("second.txt").unwrap();
         assert_eq!(reader.read_line().unwrap(), Some("s1".to_string()));
@@ -1331,10 +1248,7 @@ mod tests {
 
     #[test]
     fn test_reader_read_file_line() {
-        let mut reader = make_reader(vec![
-            ("a.txt", "a1\na2\n"),
-            ("b.txt", "b1\n"),
-        ]);
+        let mut reader = make_reader(vec![("a.txt", "a1\na2\n"), ("b.txt", "b1\n")]);
         // Read from file "b.txt" via read_file_line (separate cursor)
         assert_eq!(
             reader.read_file_line("b.txt").unwrap(),

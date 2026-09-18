@@ -1,0 +1,17 @@
+/// Host-provided plugin dispatch interface.
+///
+/// The wasmtime host runtime implements this interface to route
+/// tool calls from wawk-mcp to the appropriate loaded WASM plugin.
+/// Each plugin exports tools through wawk:plugins/external-functions;
+/// the host resolves the correct plugin instance and invokes it.
+package wawk:plugin-host@0.1.0;
+
+interface host-functions {
+    /// Dispatch a tool call to the target plugin.
+    ///
+    /// tool-name: composite "plugin/tool" identifier
+    /// arguments: JSON-encoded argument string
+    ///
+    /// Returns the plugin response string, or an error message.
+    call-plugin: func(tool-name: string, arguments: string) -> string;
+}
