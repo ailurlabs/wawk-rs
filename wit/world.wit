@@ -1,0 +1,80 @@
+/// Canonical WIT interface for wawk plugins.
+///
+/// This is the single source of truth for the plugin contract.
+/// All plugins export this interface. All hosts (wawk-wasi, wawk-bindgen)
+/// import it — either via WIT composition or via a JS bridge that speaks
+/// the canonical ABI.
+///
+/// ## Plugin development
+///
+/// 1. Copy this file to your plugin's `wit/` directory
+/// 2. Use `wit-bindgen` to generate exports
+/// 3. Implement the `Guest` trait
+/// 4. Build: `cargo build --target wasm32-unknown-unknown --release`
+/// 5. The resulting .wasm works in wasmtime, browser, and Node.js
+///
+/// ## Canonical ABI
+///
+/// The generated core wasm exports:
+/// - `wawk:plugins/external-functions#call` — string dispatch
+/// - `cabi_realloc` — memory allocation
+/// - `cabi_post_wawk:plugins/external-functions#call` — result cleanup
+/// - `memory` — linear memory
+///
+/// Hosts call `#call(name_ptr, name_len, args_ptr, args_len) -> result_ptr`.
+/// The result is an `option<string>` at result_ptr:
+///   - offset 0: tag (i32) — 0=None, 1=Some
+///   - offset 4: string.ptr (i32) — valid if Some
+///   - offset 8: string.len (i32) — valid if Some
+
+package wawk:plugins;
+
+/// Plugin interface for extending wawk with custom functions.
+///
+/// When the AWK evaluator encounters an unknown function name,
+/// it calls `call`. The plugin returns `some(result)` if it handles
+/// the function, or `none` to pass to the next plugin / report
+/// "unknown function".
+interface external-functions {
+    /// Dispatch a function call with string arguments.
+    ///
+    /// # Arguments
+    /// * `name` - The AWK function name (e.g. "greet")
+    /// * `args` - The arguments as strings
+    ///
+    /// # Returns
+    /// * `some(result)` - The function was handled; result is the return value
+    /// * `none` - This plugin does not handle the given function name
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// Format handler interface for Wasm format plugins.
+///
+/// Convention: plugins implement `__detect__`, `__parse__`, `__serialize__`
+/// functions that are dispatched via the `external-functions` interface.
+/// This interface provides a direct, typed contract for format-capable plugins.
+///
+/// ## Data format
+/// - `detect` returns the format name (e.g. "json", "xml") or empty string
+/// - `parse` receives raw input and returns a JSON-encoded PropertyTree
+/// - `serialize` receives a JSON-encoded PropertyTree and returns the serialized format
+interface format-handler {
+    /// Detect if this plugin can handle the given input.
+    /// Returns the format name if detected, empty string otherwise.
+    detect: func(input: string) -> string;
+
+    /// Parse input string into a JSON-encoded PropertyTree.
+    parse: func(input: string) -> string;
+
+    /// Serialize a JSON-encoded PropertyTree into the output format.
+    serialize: func(tree-json: string) -> string;
+}
+
+/// World for wawk plugins.
+///
+/// Plugins export `external-functions` and optionally `format-handler`.
+/// The host imports them (via WIT composition or canonical ABI bridge).
+world wawk-plugin {
+    export external-functions;
+    export format-handler;
+}

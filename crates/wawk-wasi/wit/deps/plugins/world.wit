@@ -1,0 +1,107 @@
+/// Canonical WIT interfaces for wawk plugins.
+///
+/// Each plugin exports a unique interface. Hosts (wawk-wasi, wawk-mcp)
+/// import the interfaces they need for multi-plugin composition.
+///
+/// Convention:
+/// - `external-functions` is reserved for partner/third-party plugins (xlead-funnel)
+/// - Our plugins use precise hyphenated names: formula-functions, crypto-functions, etc.
+/// - Format interfaces are optional — only plugins with real format handling export them
+
+package wawk:plugins;
+
+// ============================================================================
+// Function interfaces — one per plugin
+// ============================================================================
+
+/// Partner/third-party convention — DO NOT CHANGE.
+/// Used by xlead-funnel and other external plugins.
+interface external-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// Math, financial, and statistical functions (450+ functions).
+interface formula-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// Cryptographic operations: hashing, HMAC, encryption, encoding.
+interface crypto-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// CEL (Common Expression Language) evaluation.
+interface cel-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// JSONata JSON query and transformation.
+interface jsonata-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// Commodity trading domain data: unit conversion, FX, benchmarks, alerts.
+interface commodity-reconcile-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// Example/demo plugin functions.
+interface hello-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// License management: validation, generation, encryption.
+interface license-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// OAuth/JWT token management.
+interface oauth-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// FEEL (Friendly Enough Expression Language) — pure C implementation.
+interface feel-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+// ============================================================================
+// Format interfaces — only for plugins with real format handling
+// ============================================================================
+
+/// Commodity price data format handling (JSON detection, parsing, serialization).
+interface commodity-reconcile-format {
+    detect: func(input: string) -> string;
+    parse: func(input: string) -> string;
+    serialize: func(tree-json: string) -> string;
+}
+
+/// JSONata input format handling.
+interface jsonata-format {
+    detect: func(input: string) -> string;
+    parse: func(input: string) -> string;
+    serialize: func(tree-json: string) -> string;
+}
+
+// ============================================================================
+// Legacy world definitions (for backward compatibility during migration)
+// ============================================================================
+
+/// Default world for plugins WITHOUT format handling.
+world wawk-plugin {
+    export external-functions;
+}
+
+/// World for plugins WITH real format handling.
+world wawk-plugin-with-format {
+    export external-functions;
+    export format-handler;
+}
+
+/// Legacy format-handler interface (being phased out — only commodity-reconcile
+/// and jsonata keep real implementations via their named format interfaces).
+interface format-handler {
+    detect: func(input: string) -> string;
+    parse: func(input: string) -> string;
+    serialize: func(tree-json: string) -> string;
+}

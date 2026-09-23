@@ -1,0 +1,56 @@
+/** Canonical WIT interfaces for wawk plugins.
+ *
+ * This is the single source of truth for the plugin contract.
+ * Each plugin exports a unique interface. All hosts (wawk-wasi, wawk-mcp,
+ * wawk-bindgen) import the interfaces they need.
+ *
+ * Convention:
+ * - `external-functions` is reserved for partner/third-party plugins (e.g. third-party plugins)
+ * - Our plugins use precise hyphenated names for their interfaces
+ * - Format interfaces are optional — only plugins with real format handling export them
+ */
+
+package wawk:plugins;
+
+// ============================================================================
+// Function interfaces — one per plugin
+// ============================================================================
+
+/// Partner/third-party convention — DO NOT CHANGE.
+/// Used by third-party and partner plugins.
+interface external-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+
+
+
+
+
+/// Example/demo plugin functions.
+interface hello-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+
+
+
+// ============================================================================
+// Format interfaces — only for plugins with real format handling
+// ============================================================================
+
+
+
+// ============================================================================
+// World definitions — each plugin uses the one matching its capabilities
+// ============================================================================
+
+/// Default world for plugins WITHOUT format handling (most plugins).
+world wawk-plugin {
+    export external-functions;
+}
+
+/// World for plugins WITH format handling
+world wawk-plugin-with-format {
+    export external-functions;
+}
