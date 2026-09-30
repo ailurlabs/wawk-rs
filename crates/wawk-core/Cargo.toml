@@ -1,0 +1,29 @@
+[package]
+name = "wawk-core"
+description = "The pure AWK engine - parser, AST, and evaluator with no direct I/O"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+keywords = ["awk", "interpreter", "posix", "text-processing", "wasm"]
+categories = ["parser-implementations", "text-processing", "wasm"]
+repository = "https://github.com/ailurlabs/wawk-rs"
+
+[dependencies]
+nom = { workspace = true }
+thiserror = { workspace = true }
+regex = { workspace = true }
+rustc-hash = "2"
+itoa = "1"
+ryu = "1"
+serde_json = { version = "1", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+quick-xml = { version = "0.39.4", features = ["serialize"] }
+serde_yaml = "0.9.34"
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "awk_benchmarks"
+harness = false
