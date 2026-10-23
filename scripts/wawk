@@ -1,0 +1,5 @@
+#!/bin/sh
+# wawk — CLI wrapper for wasmtime
+# Usage: wawk [args...] — same as: wasmtime wawk.wasm [args...]
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec wasmtime "$SCRIPT_DIR/wawk.wasm" "$@"

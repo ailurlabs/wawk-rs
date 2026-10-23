@@ -1,0 +1,29 @@
+/// Canonical WIT interfaces for wawk plugins.
+///
+/// Each plugin exports a unique interface named PLUGINNAME-functions.
+/// Format interfaces are optional — only plugins with real format handling export them.
+
+package wawk:plugins;
+
+/// Plugin function interface — dispatch a tool call by name with JSON arguments.
+interface PLUGINNAME-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// Optional format handling for plugins that parse/serialize document formats.
+interface PLUGINNAME-format {
+    detect: func(input: string) -> string;
+    parse: func(input: string) -> string;
+    serialize: func(tree-json: string) -> string;
+}
+
+/// Default world for plugins WITHOUT format handling.
+world wawk-plugin {
+    export PLUGINNAME-functions;
+}
+
+/// World for plugins WITH format handling.
+world wawk-plugin-with-format {
+    export PLUGINNAME-functions;
+    export PLUGINNAME-format;
+}

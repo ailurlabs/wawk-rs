@@ -1,0 +1,37 @@
+[package]
+name = "wawk-wasi"
+description = "WASM component CLI for wawk-core — composable with WIT plugins via wac plug"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+keywords = ["awk", "wasm", "wasip2", "text-processing", "posix"]
+categories = ["wasm", "text-processing"]
+repository = "https://github.com/ailurlabs/wawk-rs"
+
+[package.metadata.component]
+package = "wawk:wasi-cli"
+
+[package.metadata.component.target]
+path = "wit/cli-runner.wit"
+world = "cli-runner"
+
+[package.metadata.component.target.dependencies]
+"wasi:cli" = { path = "wit/deps/cli" }
+"wasi:io" = { path = "wit/deps/io" }
+"wasi:clocks" = { path = "wit/deps/clocks" }
+"wasi:filesystem" = { path = "wit/deps/filesystem" }
+"wasi:sockets" = { path = "wit/deps/sockets" }
+"wasi:random" = { path = "wit/deps/random" }
+"wawk:plugins" = { path = "wit/deps/plugins" }
+
+[lib]
+name = "wawk_wasi"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+wawk-core = { workspace = true }
+memchr = "2"
+wit-bindgen = "0.42"
+wit-bindgen-rt = "0.42"

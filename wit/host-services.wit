@@ -1,0 +1,17 @@
+package wawk:services;
+
+/// Host-provided platform services that plugins can call back into.
+/// This is a GENERIC platform capability — no commercial or domain-specific content.
+interface host-services {
+    /// Dispatch a notification event to an external system.
+    notify: func(event-type: string, payload: string) -> result<string, string>;
+
+    /// Store a key-value pair persistently.
+    store-set: func(key: string, value: string) -> result<_, string>;
+
+    /// Retrieve a stored value by key.
+    store-get: func(key: string) -> result<string, string>;
+
+    /// Emit a structured log entry.
+    log: func(level: string, message: string);
+}
