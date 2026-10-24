@@ -227,16 +227,16 @@ PropertyTree
 | `to_json(expr)` | Serialize value to JSON string |
 | `from_json(str)` | Parse JSON string to value |
 
-### 2.5 Plugin System (WIT Component Model)
+### 2.5 Extension System (WIT Component Model)
 
-wawk supports plugins via the WIT Component Model:
+wawk supports extensions via the WIT Component Model:
 
 | Interface | Description |
 |-----------|-------------|
-| `external-functions` | Function dispatch: `call(name, args) -> option<string>` |
-| `format-handler` | Format plugin: `detect`, `parse`, `serialize` |
+| `extension-functions` | Function dispatch: `call(name, args) -> option<string>` |
+| `extension-formats` | Format extension: `detect`, `parse`, `serialize` |
 
-**Plugin Features:**
+**Extension Features:**
 - WebAssembly components (.wasm)
 - Sandboxed execution
 - O(1) function dispatch via index
@@ -285,7 +285,7 @@ wawk supports plugins via the WIT Component Model:
 | WebAssembly | ✅ Native | ❌ | ❌ | ❌ |
 | JSON access | ✅ Native | ❌ | ❌ | ❌ |
 | Multi-format (XML/YAML/CSV) | ✅ | ❌ | ❌ | ❌ |
-| Plugin system | ✅ WIT | ⚠️ Extensions | ❌ | ❌ |
+| Extension system | ✅ WIT | ⚠️ Extensions | ❌ | ❌ |
 | Security sandbox | ✅ | ❌ | ❌ | ❌ |
 | Bitwise functions | ✅ | ✅ | ❌ | ❌ |
 | Time functions | ✅ | ✅ | ❌ | ❌ |
@@ -307,8 +307,8 @@ wawk supports plugins via the WIT Component Model:
 | `asorti()` | ❌ Not implemented | gawk extension |
 | `isarray()` | ❌ Not implemented | gawk extension |
 | `bindtextdomain()` | ❌ Not implemented | i18n not needed in Wasm |
-| `@include` | ❌ Not implemented | Use plugins instead |
-| `@load` | ❌ Not implemented | Use WIT plugins instead |
+| `@include` | ❌ Not implemented | Use extensions instead |
+| `@load` | ❌ Not implemented | Use WIT extensions instead |
 | MPFR/GMP arbitrary precision | ❌ Not implemented | Uses f64 |
 | XML serialization | ⚠️ Partial | Parse only |
 | YAML serialization | ⚠️ Partial | Parse only |
@@ -322,7 +322,7 @@ wawk supports plugins via the WIT Component Model:
 Most gawk programs work unchanged. Replace:
 - `gensub()` → use `sub()`/`gsub()` or write user function
 - `asort()`/`asorti()` → implement sorting in user function
-- `@include "file"` → use WIT plugins
+- `@include "file"` → use WIT extensions
 
 ### From mawk/nawk to wawk
 

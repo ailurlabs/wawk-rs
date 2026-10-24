@@ -9,7 +9,7 @@
 //!   - Hash table operations (associative_array)
 //!   - Lexer throughput (lexer_bench)
 //!   - Parser throughput (parser_bench)
-//!   - External function dispatch overhead (plugin_dispatch)
+//!   - External function dispatch overhead (extension_dispatch)
 //!
 //! Run with:
 //!   cargo bench -p wawk-core
@@ -21,7 +21,7 @@ use wawk_core::error::AwkResult;
 use wawk_core::lexer::Lexer;
 use wawk_core::parser::parse;
 use wawk_core::traits::{
-    BlockedCommandExecutor, BufferedReader, BufferedWriter, FunctionDispatcher, PluginCapability,
+    BlockedCommandExecutor, BufferedReader, BufferedWriter, FunctionDispatcher, ExtensionCapability,
     SandboxEnvironment,
 };
 use wawk_core::WawkEngine;
@@ -244,14 +244,14 @@ fn bench_parser(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------
-// Plugin dispatch benchmark
+// Extension dispatch benchmark
 // ---------------------------------------------------------------------------
 
 /// A mock external function handler that returns immediately.
 /// Used to measure the overhead of dispatching through the external function interface.
 struct MockExternalHandler;
 
-impl PluginCapability for MockExternalHandler {
+impl ExtensionCapability for MockExternalHandler {
     fn capability_name(&self) -> &'static str {
         "function_dispatch"
     }
@@ -267,14 +267,14 @@ impl FunctionDispatcher for MockExternalHandler {
 
 /// AWK script that calls an external function on every line.
 /// The function is not defined in AWK, so it falls through to the external handler.
-const SCRIPT_PLUGIN_DISPATCH: &str = "{ print plugin_fn($1, $2) }";
+const SCRIPT_EXTENSION_DISPATCH: &str = "{ print extension_fn($1, $2) }";
 
-fn bench_plugin_dispatch(c: &mut Criterion) {
+fn bench_extension_dispatch(c: &mut Criterion) {
     let data = generate_test_data();
-    let mut group = c.benchmark_group("plugin");
+    let mut group = c.benchmark_group("extension");
     group.throughput(Throughput::Elements(NUM_LINES as u64));
 
-    group.bench_function("plugin_dispatch", |b| {
+    group.bench_function("extension_dispatch", |b| {
         b.iter_batched(
             || {
                 // Setup: create fresh engine, reader, writer per iteration batch
@@ -289,14 +289,14 @@ fn bench_plugin_dispatch(c: &mut Criterion) {
                 let handler = Box::new(MockExternalHandler);
                 engine
                     .execute_with_handler(
-                        black_box(SCRIPT_PLUGIN_DISPATCH),
+                        black_box(SCRIPT_EXTENSION_DISPATCH),
                         &mut reader,
                         &mut writer,
                         &env,
                         &mut cmd,
                         handler,
                     )
-                    .expect("plugin dispatch benchmark should not fail");
+                    .expect("extension dispatch benchmark should not fail");
                 black_box(writer)
             },
             criterion::BatchSize::LargeInput,
@@ -330,10 +330,10 @@ criterion_group! {
 }
 
 criterion_group! {
-    name = plugin_workloads;
+    name = extension_workloads;
     config = Criterion::default();
     targets =
-        bench_plugin_dispatch,
+        bench_extension_dispatch,
 }
 
-criterion_main!(awk_workloads, parser_workloads, plugin_workloads);
+criterion_main!(awk_workloads, parser_workloads, extension_workloads);

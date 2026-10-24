@@ -1,20 +1,20 @@
 /// Request context interface for accessing per-request data.
 ///
-/// This interface allows plugins to access HTTP headers and environment
+/// This interface allows extensions to access HTTP headers and environment
 /// variables that are scoped to the current request. The host (e.g., wawk-mcp)
-/// implements this interface and provides it to plugins via WIT composition.
+/// implements this interface and provides it to extensions via WIT composition.
 ///
 /// ## Design Rationale
 ///
 /// Per-request data (like API keys in HTTP headers) cannot be passed through
 /// container-level environment variables, which are set at startup. Instead,
 /// the host injects request-scoped data through this interface, allowing
-/// plugins to read headers like `x-api-key` without polluting the function
+/// extensions to read headers like `x-api-key` without polluting the function
 /// argument signature.
 ///
 /// ## Usage
 ///
-/// Plugins import this interface and call `get-header` or `get-env` to read
+/// Extensions import this interface and call `get-header` or `get-env` to read
 /// request-scoped values:
 ///
 /// ```rust
@@ -31,11 +31,11 @@ package wawk:context;
 
 /// Request context interface for accessing per-request HTTP headers and env vars.
 ///
-/// The host implements this interface to provide plugins with access to
+/// The host implements this interface to provide extensions with access to
 /// request-scoped data. Each request may have different headers (e.g.,
 /// different API keys for different clients), and this interface allows
-/// plugins to read those headers without requiring changes to the
-/// `PLUGINNAME-functions.call` signature.
+/// extensions to read those headers without requiring changes to the
+/// `EXTENSIONNAME-functions.call` signature.
 interface request-context {
     /// Get an HTTP header value from the current request.
     ///
@@ -67,7 +67,7 @@ interface request-context {
 
 /// World for request context.
 ///
-/// Hosts (like wawk-mcp) export this interface. Plugins import it to
+/// Hosts (like wawk-mcp) export this interface. Extensions import it to
 /// access per-request data.
 world context-world {
     export request-context;

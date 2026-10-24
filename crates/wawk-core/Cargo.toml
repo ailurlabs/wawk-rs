@@ -18,8 +18,8 @@ itoa = "1"
 ryu = "1"
 serde_json = { version = "1", default-features = false, features = ["std"] }
 serde = { version = "1", features = ["derive"] }
-quick-xml = { version = "0.39.4", features = ["serialize"] }
-serde_yaml = "0.9.34"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -27,3 +27,7 @@ criterion = { workspace = true }
 [[bench]]
 name = "awk_benchmarks"
 harness = false
+
+[[bin]]
+name = "wawk-codegen"
+path = "src/bin/wawk-codegen.rs"

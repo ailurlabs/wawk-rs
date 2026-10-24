@@ -113,7 +113,7 @@ struct WebCommandExecutor;
 impl AwkCommandExecutor for WebCommandExecutor {
     fn execute(&mut self, _cmd: &str) -> AwkResult<String> {
         Err(wawk_core::error::AwkError::RuntimeError(
-            "system() is not available in the WASM sandbox. Use a WIT plugin for host-provided command execution.".to_string()
+            "system() is not available in the WASM sandbox. Use a WIT extension for host-provided command execution.".to_string()
         ))
     }
 }
@@ -168,7 +168,7 @@ pub fn exec_awk(script: &str, input: &str) -> String {
 }
 
 fn exec_awk_inner(script: &str, input: &str) -> Result<String, String> {
-    // Preprocess to handle @plugin and @include directives
+    // Preprocess to handle @extension and @include directives
     let expanded =
         wawk_core::preprocessor::preprocess(script, &wawk_core::traits::SandboxIncludeResolver)
             .map_err(|e| e.to_string())?;

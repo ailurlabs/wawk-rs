@@ -1,6 +1,6 @@
 package wawk:services;
 
-/// Host-provided platform services that plugins can call back into.
+/// Host-provided platform services that extensions can call back into.
 /// This is a GENERIC platform capability — no commercial or domain-specific content.
 interface host-services {
     /// Dispatch a notification event to an external system.

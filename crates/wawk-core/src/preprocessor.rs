@@ -2,7 +2,7 @@
 //!
 //! Handles:
 //! - `@include "path"` directives (gawk-compatible): expands included files
-//! - `@plugin "name"` directives: preserved as inert comments and not semantically processed
+//! - `@extension "name"` directives: preserved as inert comments and not semantically processed
 //!
 
 use crate::error::{AwkError, AwkResult};
@@ -21,7 +21,7 @@ pub struct PreprocessResult {
 pub fn preprocess(script: &str, resolver: &dyn IncludeResolver) -> AwkResult<String> {
     let mut chain = vec!["<main>".to_string()];
     let expanded = expand_includes(script, resolver, &mut chain, 0)?;
-    apply_plugin_directives(&expanded)
+    apply_extension_directives(&expanded)
 }
 
 /// Preprocess with a named source.
@@ -32,7 +32,7 @@ pub fn preprocess_named(
 ) -> AwkResult<String> {
     let mut chain = vec![source_name.to_string()];
     let expanded = expand_includes(script, resolver, &mut chain, 0)?;
-    apply_plugin_directives(&expanded)
+    apply_extension_directives(&expanded)
 }
 
 /// Preprocess an AWK script, expanding `@include` directives.
@@ -43,7 +43,7 @@ pub fn preprocess_with_meta(
 ) -> AwkResult<PreprocessResult> {
     let mut chain = vec!["<main>".to_string()];
     let expanded = expand_includes(script, resolver, &mut chain, 0)?;
-    apply_plugin_directives_with_meta(&expanded)
+    apply_extension_directives_with_meta(&expanded)
 }
 
 /// Preprocess with a named source. Returns expanded script.
@@ -54,21 +54,21 @@ pub fn preprocess_named_with_meta(
 ) -> AwkResult<PreprocessResult> {
     let mut chain = vec![source_name.to_string()];
     let expanded = expand_includes(script, resolver, &mut chain, 0)?;
-    apply_plugin_directives_with_meta(&expanded)
+    apply_extension_directives_with_meta(&expanded)
 }
 
-/// Convert @plugin directives to inert comments.
+/// Convert @extension directives to inert comments.
 ///
 /// All other lines pass through unchanged. Directives are emitted as comments
 /// so the parser never sees them and line numbers are preserved.
-fn apply_plugin_directives_with_meta(script: &str) -> AwkResult<PreprocessResult> {
+fn apply_extension_directives_with_meta(script: &str) -> AwkResult<PreprocessResult> {
     let mut output = String::with_capacity(script.len());
 
     for line in script.lines() {
         let trimmed = line.trim();
 
-        // @plugin directive: convert to inert comment
-        if trimmed.starts_with("@plugin") {
+        // @extension directive: convert to inert comment
+        if trimmed.starts_with("@extension") {
             output.push_str(&format!("# {}\n", trimmed));
             continue;
         }
@@ -139,9 +139,9 @@ fn expand_includes(
     Ok(output)
 }
 
-/// Apply @plugin directive handling (no rewriting, backward-compatible API).
-fn apply_plugin_directives(script: &str) -> AwkResult<String> {
-    apply_plugin_directives_with_meta(script).map(|result| result.script)
+/// Apply @extension directive handling (no rewriting, backward-compatible API).
+fn apply_extension_directives(script: &str) -> AwkResult<String> {
+    apply_extension_directives_with_meta(script).map(|result| result.script)
 }
 
 /// Parse an `@include "path"` directive from a line.
@@ -339,13 +339,13 @@ mod tests {
         assert_eq!(parse_include_directive("@includefile \"x\""), None);
     }
 
-    // ---- @plugin directive tests ----
+    // ---- @extension directive tests ----
 
     #[test]
-    fn test_plugin_directive_preserved_as_comment() {
+    fn test_extension_directive_preserved_as_comment() {
         let resolver = MapResolver::new();
-        let script = "@plugin \"foo\"\nBEGIN { x = 1 }";
+        let script = "@extension \"foo\"\nBEGIN { x = 1 }";
         let result = preprocess(script, &resolver).unwrap();
-        assert!(result.contains("# @plugin \"foo\""), "got: {}", result);
+        assert!(result.contains("# @extension \"foo\""), "got: {}", result);
     }
 }

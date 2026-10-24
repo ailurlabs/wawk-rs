@@ -57,43 +57,43 @@ Automatic structured data detection and parsing via the PropertyTree data model.
 Dot-notation (`$.field`) and positional access (`$1`, `$2`) work across all structured formats.
 
 ### Multi-Format Input/Output
-Built-in handlers for JSON, XML, YAML, and CSV — all supported as both input and output formats with automatic detection on input. Custom format plugins can extend support via the WIT format-handler interface.
+Built-in handlers for JSON, XML, YAML, and CSV — all supported as both input and output formats with automatic detection on input. Custom format extensions can extend support via the WIT extension-formats interface.
 
-### Plugin System (WIT Component Model)
-Two plugin interfaces:
+### Extension System (WIT Component Model)
+Two extension interfaces:
 - **External Functions**: Export callable functions from Wasm to AWK
 - **Format Handler**: Custom input/output format detection, parsing, and serialization
 
-Plugins are standard WebAssembly components built to the `wasm32-wasip2` target with `cargo component build` and the `wit-bindgen` v0.42 binding generator.
+Extensions are standard WebAssembly components built to the `wasm32-wasip2` target with `cargo component build` and the `wit-bindgen` v0.42 binding generator.
 
 
 #### Namespace System
-Each plugin declares a namespace in its `__meta__` JSON. Functions are called using qualified notation:
+Each extension declares a namespace in its `__meta__` JSON. Functions are called using qualified notation:
 
 ```awk
 # Qualified call: namespace.function(args)
-result = my_plugin.compute(1, 2, 3)
-output = another_plugin.transform("hello")
+result = my_extension.compute(1, 2, 3)
+output = another_extension.transform("hello")
 ```
 
-The `@plugin` directive sets a default namespace for unqualified calls (in addition to compile-time prefix rewriting):
+The `@extension` directive sets a default namespace for unqualified calls (in addition to compile-time prefix rewriting):
 
 ```awk
-@plugin "my_plugin"
+@extension "my_extension"
 BEGIN {
     # Unqualified calls resolve via default namespace
-    x = compute(1, 2, 3)    # equivalent to my_plugin.compute(1, 2, 3)
+    x = compute(1, 2, 3)    # equivalent to my_extension.compute(1, 2, 3)
 }
 ```
 
-Example plugin namespaces:
+Example extension namespaces:
 
-| Namespace | Plugin | Functions |
+| Namespace | Extension | Functions |
 |-----------|--------|-----------|
 | `hello` | wawk-hello | greet, echo |
 
-Additional plugins can be developed following the plugin specification in [SPEC.md](SPEC.md) §3.
-See [SPEC.md](SPEC.md) §3 for the full plugin specification.
+Additional extensions can be developed following the extension specification in [SPEC.md](SPEC.md) §3.
+See [SPEC.md](SPEC.md) §3 for the full extension specification.
 
 ## Optimizations
 
@@ -161,7 +161,7 @@ python3 crates/wawk-bindgen/tests/wasmtime_tests.py
 
 ## Dispatcher Codegen (`wawk-codegen`)
 
-Build-time code generation tool for the dynamic plugin dispatch system. Reads a `plugin-manifest.json` and generates a complete WASM dispatcher component project.
+Build-time code generation tool for the dynamic extension dispatch system. Reads a `extension-manifest.json` and generates a complete WASM dispatcher component project.
 
 ```bash
 # Generate dispatcher project from manifest
@@ -174,12 +174,12 @@ cargo run -p wawk-codegen -- <manifest.json> <output-dir> --dry-run
 **Generated output:**
 - `Cargo.toml` — WASM component project configuration
 - `src/lib.rs` — crate root with `wit_bindgen::generate!` and all interface mappings
-- `src/dispatcher.rs` — namespace-based routing (e.g. `product-a.lookup` → plugin)
-- `wit/dispatcher.wit` — dispatcher world importing all plugin + host-services interfaces
-- `wit/deps/plugins/world.wit` — plugin interface definitions
+- `src/dispatcher.rs` — namespace-based routing (e.g. `product-a.lookup` → extension)
+- `wit/dispatcher.wit` — dispatcher world importing all extension + host-services interfaces
+- `wit/deps/extensions/world.wit` — extension interface definitions
 - `wit/deps/services/host-services.wit` — host callback interface
 
-**Architecture:** Each product (mcp-server-*) has a `plugin-manifest.json` declaring its plugin dependencies. The codegen produces a dispatcher that routes tool calls by namespace prefix to the correct plugin via WIT imports. The dispatcher WASM is composed with plugin WASMs via `wac plug` into the wawk-mcp host.
+**Architecture:** Each product (mcp-server-*) has a `extension-manifest.json` declaring its extension dependencies. The codegen produces a dispatcher that routes tool calls by namespace prefix to the correct extension via WIT imports. The dispatcher WASM is composed with extension WASMs via `wac plug` into the wawk-mcp host.
 
 ## Delivery Vehicles
 

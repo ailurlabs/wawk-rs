@@ -1,0 +1,17 @@
+/// Host-provided extension dispatch interface.
+///
+/// The wasmtime host runtime implements this interface to route
+/// tool calls from wawk-mcp to the appropriate loaded WASM extension.
+/// Each extension exports tools through wawk:extensions/EXTENSIONNAME-functions;
+/// the host resolves the correct extension instance and invokes it.
+package wawk:extension-host@0.1.0;
+
+interface host-functions {
+    /// Dispatch a tool call to the target extension.
+    ///
+    /// tool-name: composite "extension/tool" identifier
+    /// arguments: JSON-encoded argument string
+    ///
+    /// Returns the extension response string, or an error message.
+    call-extension: func(tool-name: string, arguments: string) -> string;
+}

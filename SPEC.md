@@ -8,7 +8,7 @@
 
 ## Overview
 
-Wawk is a POSIX-compliant AWK interpreter compiled to WebAssembly, with plugin extensibility via the WIT Component Model. It runs identically across browsers, servers, and edge runtimes.
+Wawk is a POSIX-compliant AWK interpreter compiled to WebAssembly, with extension extensibility via the WIT Component Model. It runs identically across browsers, servers, and edge runtimes.
 
 ---
 
@@ -48,25 +48,25 @@ Wawk extends AWK with a universal structured data model (PropertyTree) that serv
 # Output: Alice Berlin
 ```
 
-### 3. Plugin System
+### 3. Extension System
 
-Wawk supports plugins via the WIT Component Model with two interfaces:
+Wawk supports extensions via the WIT Component Model with two interfaces:
 
-- **External Functions**: `wawk:plugins/external-functions`
-  - Plugins export named functions callable from AWK scripts
+- **External Functions**: `wawk:extensions/extension-functions`
+  - Extensions export named functions callable from AWK scripts
   - Functions accept string arguments and return string results
   - Host dispatches via `FunctionDispatcher` trait
 
-- **Format Handler**: `wawk:plugins/format-handler`
-  - Plugins implement custom input format detection, parsing, and serialization
+- **Format Handler**: `wawk:extensions/extension-formats`
+  - Extensions implement custom input format detection, parsing, and serialization
   - Convention-based: `__detect__`, `__parse__`, `__serialize__` functions
   - Priority-based registration (lower = higher priority)
   - Built-in handlers (input and output): JSON (10), XML (30), YAML (40), CSV (50)
 
-- **Plugin format**: WebAssembly components (.wasm) built with `wasm32-unknown-unknown`
-- **Loading**: `--plugin` flag or `plugins/` directory
+- **Extension format**: WebAssembly components (.wasm) built with `wasm32-unknown-unknown`
+- **Loading**: `--extension` flag or `extensions/` directory
 - **Languages**: Rust, C, Go, TypeScript (any WIT-compatible language)
-- **Sandboxing**: Plugins run in isolated Wasm sandbox
+- **Sandboxing**: Extensions run in isolated Wasm sandbox
 
 ### 4. Security Features
 

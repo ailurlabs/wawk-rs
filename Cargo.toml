@@ -4,7 +4,6 @@ members = [
     "crates/wawk-core",
     "crates/wawk-wasi",
     "crates/wawk-bindgen",
-    "crates/wawk-codegen",
 ]
 
 [workspace.package]

@@ -27,6 +27,7 @@ pub mod parser;
 pub mod preprocessor;
 pub mod traits;
 pub mod types;
+pub mod dispatcher;
 
 use error::AwkResult;
 use eval::Evaluator;
@@ -286,7 +287,7 @@ impl WawkEngine {
 
     /// Execute an AWK script with both `@include` support and an external function handler.
     ///
-    /// `@plugin` directives are preserved as inert comments during preprocessing
+    /// `@extension` directives are preserved as inert comments during preprocessing
     /// and are not semantically processed. Routing is the host's responsibility.
     #[allow(clippy::too_many_arguments)]
     pub fn execute_with_includes_and_handler(
