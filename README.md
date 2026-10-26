@@ -4,7 +4,7 @@ Pure AWK engine + extension dispatcher targeting WebAssembly.
 
 ## Architecture
 
-wawk-rs is a modular Rust workspace that compiles a POSIX-compliant AWK engine to WebAssembly. Extensions are loaded at build time through a dynamic dispatcher with namespace-based routing — there is no runtime plugin loading.
+wawk-rs is a modular Rust workspace that compiles a POSIX-compliant AWK engine to WebAssembly. Extensions are loaded at build time through a dynamic dispatcher with namespace-based routing — there is no runtime extension loading.
 
 ### Crate Structure
 
@@ -32,7 +32,7 @@ extension-manifest.json
   composed via wac plug into the wawk host
 ```
 
-There is no runtime plugin mechanism. All extensions are resolved and composed before execution.
+There is no runtime extension mechanism. All extensions are resolved and composed before execution.
 
 ### Extension Interface (WIT)
 
