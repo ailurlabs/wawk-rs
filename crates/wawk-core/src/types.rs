@@ -196,27 +196,27 @@ impl PartialEq for PropertyTree {
     }
 }
 
-/// Registry for plugin-provided types.
-/// Plugins register type tags (e.g., "@date", "@grid") and the engine
+/// Registry for extension-provided types.
+/// Extensions register type tags (e.g., "@date", "@grid") and the engine
 /// recognizes them for typeof() and display purposes.
-pub struct PluginTypeRegistry {
+pub struct ExtensionTypeRegistry {
     tag_to_type: FxHashMap<String, String>,
 }
 
-impl PluginTypeRegistry {
+impl ExtensionTypeRegistry {
     pub fn new() -> Self {
         Self {
             tag_to_type: FxHashMap::default(),
         }
     }
 
-    /// Register a plugin-provided type.
+    /// Register a extension-provided type.
     pub fn register(&mut self, type_name: &str, type_tag: &str, _provider: &str) {
         self.tag_to_type
             .insert(type_tag.to_string(), type_name.to_string());
     }
 
-    /// Check if a string value is a tagged plugin type.
+    /// Check if a string value is a tagged extension type.
     /// Returns the type name if recognized, None otherwise.
     pub fn resolve_tag(&self, value: &str) -> Option<&str> {
         if !value.starts_with('@') {
@@ -231,7 +231,7 @@ impl PluginTypeRegistry {
     }
 }
 
-impl Default for PluginTypeRegistry {
+impl Default for ExtensionTypeRegistry {
     fn default() -> Self {
         Self::new()
     }

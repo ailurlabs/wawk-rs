@@ -4,7 +4,7 @@
 
 use std::fs;
 use std::path::PathBuf;
-use wawk_codegen::{
+use wawk_core::dispatcher::{
     generate_dispatcher_rs, generate_dispatcher_wit, generate_lib_rs, load_manifest,
     write_dispatcher,
 };
@@ -24,23 +24,23 @@ fn temp_output_dir() -> PathBuf {
 }
 
 fn create_test_manifest(dir: &std::path::Path) -> PathBuf {
-    let manifest_path = dir.join("plugin-manifest.json");
+    let manifest_path = dir.join("extension-manifest.json");
     let content = r#"{
   "name": "test-product",
   "version": "1.0.0",
   "description": "Integration test product",
-  "plugins": [
+  "extensions": [
     {
       "name": "domain",
       "interface": "domain-functions",
       "format": true,
-      "description": "Domain plugin"
+      "description": "Domain extension"
     },
     {
-      "name": "plugin-1",
-      "interface": "plugin-1-functions",
+      "name": "extension-1",
+      "interface": "extension-1-functions",
       "format": false,
-      "description": "Math plugin"
+      "description": "Math extension"
     }
   ],
   "host_services": {
@@ -66,16 +66,16 @@ fn test_full_pipeline_load_generate_write() {
     // Step 1: Load manifest
     let manifest = load_manifest(&manifest_path).unwrap();
     assert_eq!(manifest.name, "test-product");
-    assert_eq!(manifest.plugins.len(), 2);
+    assert_eq!(manifest.extensions.len(), 2);
 
     // Step 2: Generate WIT
     let wit = generate_dispatcher_wit(&manifest);
     assert!(wit.contains("package wawk:test-product;"));
     assert!(wit.contains("world test-product-dispatcher {"));
-    assert!(wit.contains("import wawk:plugins/domain-functions;"));
-    assert!(wit.contains("import wawk:plugins/plugin-1-functions;"));
-    assert!(wit.contains("import wawk:plugins/domain-format;"));
-    assert!(!wit.contains("import wawk:plugins/plugin-1-format;"));
+    assert!(wit.contains("import wawk:extensions/domain-functions;"));
+    assert!(wit.contains("import wawk:extensions/extension-1-functions;"));
+    assert!(wit.contains("import wawk:extensions/domain-format;"));
+    assert!(!wit.contains("import wawk:extensions/extension-1-format;"));
     assert!(wit.contains("import wawk:services/host-services;"));
     assert!(wit.contains("export host-functions;"));
 
@@ -84,9 +84,9 @@ fn test_full_pipeline_load_generate_write() {
     assert!(rs.contains("pub(crate) struct TestProductDispatcher;"));
     assert!(rs.contains("impl crate::bindings::exports::wawk::test_product::host_functions::Guest"));
     assert!(rs.contains("\"domain\" =>"));
-    assert!(rs.contains("\"plugin-1\" =>"));
-    assert!(rs.contains("crate::bindings::wawk::plugins::domain_functions::call"));
-    assert!(rs.contains("crate::bindings::wawk::plugins::plugin_1_functions::call"));
+    assert!(rs.contains("\"extension-1\" =>"));
+    assert!(rs.contains("crate::bindings::wawk::extensions::domain_functions::call"));
+    assert!(rs.contains("crate::bindings::wawk::extensions::extension_1_functions::call"));
     // export! is now in lib.rs
     let lib_rs = generate_lib_rs(&manifest);
     assert!(lib_rs.contains("bindings::export!(TestProductDispatcher with_types_in bindings);"));
@@ -146,7 +146,7 @@ fn test_rs_dispatch_logic_structure() {
     // Verify match structure
     assert!(rs.contains("match namespace {"));
 
-    // Verify each plugin arm has logging and routing
+    // Verify each extension arm has logging and routing
     assert!(rs.contains("[dispatcher] routing"));
 
     // Verify unknown namespace handling
@@ -157,7 +157,7 @@ fn test_rs_dispatch_logic_structure() {
 }
 
 #[test]
-fn test_single_plugin_manifest() {
+fn test_single_extension_manifest() {
     let dir = temp_output_dir();
     let manifest_path = dir.join("single.json");
     fs::write(
@@ -165,7 +165,7 @@ fn test_single_plugin_manifest() {
         r#"{
   "name": "solo",
   "version": "0.1.0",
-  "plugins": [
+  "extensions": [
     { "name": "solo", "interface": "solo-functions", "format": false }
   ]
 }"#,
@@ -176,8 +176,8 @@ fn test_single_plugin_manifest() {
     let wit = generate_dispatcher_wit(&manifest);
     let rs = generate_dispatcher_rs(&manifest);
 
-    // WIT should have exactly one plugin import
-    assert!(wit.contains("import wawk:plugins/solo-functions;"));
+    // WIT should have exactly one extension import
+    assert!(wit.contains("import wawk:extensions/solo-functions;"));
     assert!(!wit.contains("format"));
 
     // Rust should have exactly one match arm
@@ -190,7 +190,7 @@ fn test_single_plugin_manifest() {
 }
 
 #[test]
-fn test_many_plugins_manifest() {
+fn test_many_extensions_manifest() {
     let dir = temp_output_dir();
     let manifest_path = dir.join("many.json");
     fs::write(
@@ -198,7 +198,7 @@ fn test_many_plugins_manifest() {
         r#"{
   "name": "mega-product",
   "version": "2.0.0",
-  "plugins": [
+  "extensions": [
     { "name": "alpha", "interface": "alpha-functions", "format": false },
     { "name": "beta", "interface": "beta-functions", "format": true },
     { "name": "gamma", "interface": "gamma-functions", "format": false },
@@ -213,17 +213,17 @@ fn test_many_plugins_manifest() {
     let wit = generate_dispatcher_wit(&manifest);
     let rs = generate_dispatcher_rs(&manifest);
 
-    // All 5 plugins imported
-    assert!(wit.contains("import wawk:plugins/alpha-functions;"));
-    assert!(wit.contains("import wawk:plugins/beta-functions;"));
-    assert!(wit.contains("import wawk:plugins/gamma-functions;"));
-    assert!(wit.contains("import wawk:plugins/delta-functions;"));
-    assert!(wit.contains("import wawk:plugins/epsilon-functions;"));
+    // All 5 extensions imported
+    assert!(wit.contains("import wawk:extensions/alpha-functions;"));
+    assert!(wit.contains("import wawk:extensions/beta-functions;"));
+    assert!(wit.contains("import wawk:extensions/gamma-functions;"));
+    assert!(wit.contains("import wawk:extensions/delta-functions;"));
+    assert!(wit.contains("import wawk:extensions/epsilon-functions;"));
 
     // Format imports only for beta and epsilon
-    assert!(wit.contains("import wawk:plugins/beta-format;"));
-    assert!(wit.contains("import wawk:plugins/epsilon-format;"));
-    assert!(!wit.contains("import wawk:plugins/alpha-format;"));
+    assert!(wit.contains("import wawk:extensions/beta-format;"));
+    assert!(wit.contains("import wawk:extensions/epsilon-format;"));
+    assert!(!wit.contains("import wawk:extensions/alpha-format;"));
 
     // All 5 match arms in Rust
     assert!(rs.contains("\"alpha\" =>"));

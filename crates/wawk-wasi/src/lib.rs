@@ -1,6 +1,6 @@
 //! wawk-wasi — WASM component CLI for wawk-core.
 //!
-//! A WASM component composable with WIT plugins via `wac plug`.
+//! A WASM component composable with WIT extensions via `wac plug`.
 //! Runs under wasmtime with full WASI support.
 //!
 //! # Usage
@@ -8,8 +8,8 @@
 //! # Bare mode
 //! wasmtime run wawk_wasi.wasm -- -e 'BEGIN { print "hello" }'
 //!
-//! # With plugins
-//! wac plug --plug my-plugin.wasm wawk_wasi.wasm -o composed.wasm
+//! # With extensions
+//! wac plug --plug my-extension.wasm wawk_wasi.wasm -o composed.wasm
 //! wasmtime run composed.wasm -- -e 'BEGIN { print greet("world") }'
 //! ```
 
@@ -33,7 +33,7 @@ wit_bindgen::generate!({
 const MAX_SCRIPT_SIZE: usize = 1_048_576;
 
 // ============================================================================
-// WIT Plugin Dispatcher
+// WIT Extension Dispatcher
 // ============================================================================
 
 
@@ -104,7 +104,7 @@ struct BlockedCommandExecutor;
 impl AwkCommandExecutor for BlockedCommandExecutor {
     fn execute(&mut self, _cmd: &str) -> AwkResult<String> {
         Err(wawk_core::error::AwkError::RuntimeError(
-            "system() is not available in the WASM sandbox. Use a WIT plugin for host-provided command execution.".to_string()
+            "system() is not available in the WASM sandbox. Use a WIT extension for host-provided command execution.".to_string()
         ))
     }
 
@@ -147,7 +147,7 @@ impl IncludeResolver for FsIncludeResolver {
 }
 
 // ============================================================================
-// Helper: configure evaluator with optional plugin dispatcher
+// Helper: configure evaluator with optional extension dispatcher
 // ============================================================================
 
 fn configure_eval(_eval: &mut Evaluator<'_>) {

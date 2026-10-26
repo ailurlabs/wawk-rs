@@ -1,116 +1,82 @@
 # wawk-rs
 
-A modern, Wasm-portable AWK engine written in Rust.
+Pure AWK engine + extension dispatcher targeting WebAssembly.
 
-## Crates
+## Architecture
 
-| Crate | Description |
-|-------|-------------|
-| `wawk-core` | Pure AWK interpreter with trait-based I/O |
-| `wawk-wasi` | WASI CLI wrapper |
-| `wawk-bindgen` | Browser/Node.js bindings via wasm-bindgen |
+wawk-rs is a modular Rust workspace that compiles a POSIX-compliant AWK engine to WebAssembly. Extensions are loaded at build time through a dynamic dispatcher with namespace-based routing — there is no runtime plugin loading.
 
-## Quick Start
+### Crate Structure
 
-### Native CLI
-```bash
-echo "hello\nworld" | wawk '{ print $0 }'
+| Crate | Role |
+|-------|------|
+| `wawk-core` | AWK engine, extension dispatcher, and codegen binary (`wawk-codegen`) |
+| `wawk-wasi` | WASI CLI build target — standalone command-line binary |
+| `wawk-bindgen` | Browser / Node.js binding generator via `wasm-bindgen` |
+
+### Extension Architecture
+
+Extensions are compiled as WebAssembly components and wired into the dispatcher at build time by `wawk-codegen`. The codegen reads an `extension-manifest.json` and produces a dispatcher component that routes calls by namespace prefix to the correct extension via WIT imports.
+
+```text
+extension-manifest.json
+        |
+        v
+  wawk-codegen  -->  dispatcher WASM component
+        |                    |
+        |                    |-- namespace "hello"   -> wawk-hello extension
+        |                    |-- namespace "compute" -> wawk-compute extension
+        |                    |-- host-services       -> wawk-core callbacks
+        |
+        v
+  composed via wac plug into the wawk host
 ```
 
-### Rust API
-```rust
-use wawk_core::WawkEngine;
-use wawk_core::traits::{BufferedReader, BufferedWriter, SandboxEnvironment, BlockedCommandExecutor};
+There is no runtime plugin mechanism. All extensions are resolved and composed before execution.
 
-let engine = WawkEngine::new();
-let mut reader = BufferedReader::new("hello\nworld\n");
-let mut writer = BufferedWriter::new();
-let env = SandboxEnvironment::default();
-let mut cmd = BlockedCommandExecutor;
+### Extension Interface (WIT)
 
-engine.execute("{ print $0 }", &mut reader, &mut writer, &env, &mut cmd).unwrap();
-assert_eq!(writer.output, "hello\nworld\n");
+Two unified WIT interfaces cover all extension capabilities:
+
+- **`extension-functions`** — export callable functions from a Wasm component to AWK
+- **`extension-formats`** — custom input/output format detection, parsing, and serialization
+
+Extensions target `wasm32-wasip2` and use `wit-bindgen` v0.42 for binding generation.
+
+#### Namespace-Based Routing
+
+Each extension declares a namespace in its `__meta__` JSON. AWK code calls extension functions using qualified notation:
+
+```awk
+# Qualified call: namespace.function(args)
+result = compute.evaluate(1, 2, 3)
+output = hello.greet("world")
 ```
 
-### Browser (wasm-bindgen)
-```javascript
-import init, { exec_awk } from './wawk.js';
-await init();
-const result = exec_awk('{ print $1, $2 }', 'hello world\nfoo bar\n');
+The `@extension` directive sets a default namespace for unqualified calls:
+
+```awk
+@extension "compute"
+BEGIN {
+    x = evaluate(1, 2, 3)    # resolves to compute.evaluate(1, 2, 3)
+}
 ```
 
-## Features
+## PropertyTree
 
-### POSIX AWK Compliance
-Full POSIX AWK support: patterns, field splitting, built-in variables (NR, NF, FS, OFS, RS, ORS, FILENAME, FNR, ARGV, ARGC), built-in functions (50+), user-defined functions, associative arrays, control flow, and ERE regex.
+PropertyTree is the native JSON data model built into `wawk-core`. All input formats are parsed into a universal PropertyTree representation, enabling uniform field access regardless of source format:
 
-See [AWK_COMPAT.md](AWK_COMPAT.md) for the complete compatibility matrix.
-
-### PropertyTree-Native Data Model
-Automatic structured data detection and parsing via the PropertyTree data model. All input formats are parsed into a universal PropertyTree representation, enabling uniform field access regardless of source format:
 ```awk
 # Input: {"name":"Alice","address":{"city":"Berlin"}}
 { print $.name, $.address.city }
 # Output: Alice Berlin
 ```
 
-Dot-notation (`$.field`) and positional access (`$1`, `$2`) work across all structured formats.
-
-### Multi-Format Input/Output
-Built-in handlers for JSON, XML, YAML, and CSV — all supported as both input and output formats with automatic detection on input. Custom format plugins can extend support via the WIT format-handler interface.
-
-### Plugin System (WIT Component Model)
-Two plugin interfaces:
-- **External Functions**: Export callable functions from Wasm to AWK
-- **Format Handler**: Custom input/output format detection, parsing, and serialization
-
-Plugins are standard WebAssembly components built to the `wasm32-wasip2` target with `cargo component build` and the `wit-bindgen` v0.42 binding generator.
-
-
-#### Namespace System
-Each plugin declares a namespace in its `__meta__` JSON. Functions are called using qualified notation:
-
-```awk
-# Qualified call: namespace.function(args)
-result = my_plugin.compute(1, 2, 3)
-output = another_plugin.transform("hello")
-```
-
-The `@plugin` directive sets a default namespace for unqualified calls (in addition to compile-time prefix rewriting):
-
-```awk
-@plugin "my_plugin"
-BEGIN {
-    # Unqualified calls resolve via default namespace
-    x = compute(1, 2, 3)    # equivalent to my_plugin.compute(1, 2, 3)
-}
-```
-
-Example plugin namespaces:
-
-| Namespace | Plugin | Functions |
-|-----------|--------|-----------|
-| `hello` | wawk-hello | greet, echo |
-
-Additional plugins can be developed following the plugin specification in [SPEC.md](SPEC.md) §3.
-See [SPEC.md](SPEC.md) §3 for the full plugin specification.
-
-## Optimizations
-
-- Zero-allocation hot paths with reusable buffers
-- Format auto-detection skip for plain text (first-byte check)
-- Ultra-fast `print $N` with zero-copy direct write
-- FxHashMap for O(1) variable/array lookups
-- Deferred field materialization (byte ranges, no String alloc)
-- Single-hot-rule dispatch for single-pattern programs
-- Pre-compiled regex with NFA engine (ReDoS-immune)
-- `itoa`/`ryu` for fast number formatting
-- Single-pass whitespace splitting
-- Leaf expression depth check bypass
+Dot-notation (`$.field`) and positional access (`$1`, `$2`) work across all structured formats. Built-in handlers cover JSON, XML, YAML, and CSV with automatic detection on input.
 
 ## Security
 
-Security-by-design with Wasm sandboxing. See [SECURITY.md](SECURITY.md) for details.
+Sandboxed execution with deterministic output. No PII processing. See [SECURITY.md](SECURITY.md) for full details.
 
 | Limit | Value |
 |-------|-------|
@@ -134,15 +100,93 @@ Security-by-design with Wasm sandboxing. See [SECURITY.md](SECURITY.md) for deta
 | `strict` | 30 s | 64 MB | On | On | Untrusted input, web-facing services |
 | `relaxed` | 600 s | 512 MB | Off | Off | Trusted internal batch workloads |
 
-**Stack depth:** worker threads run with a 64 MB stack, so deeply nested expressions and recursive user functions fail on the engine's call-depth ceiling (256) instead of a native stack overflow.
-
 **Sandbox properties:**
+
 - `system()` blocked via `BlockedCommandExecutor`
-- No network/filesystem access in WASM sandbox
+- No network / filesystem access in Wasm sandbox
 - Environment variable whitelisting
-- Read-only ENVIRON/ARGV
+- Read-only ENVIRON / ARGV
 - NFA regex engine (ReDoS-immune)
 - Execution timeout with amortized checks
+- Deterministic execution — same input always produces same output
+
+## Build Targets
+
+### 1. Library (Rust DSL)
+
+Use `wawk-core` directly as a Rust library:
+
+```rust
+use wawk_core::WawkEngine;
+use wawk_core::traits::{BufferedReader, BufferedWriter, SandboxEnvironment, BlockedCommandExecutor};
+
+let engine = WawkEngine::new();
+let mut reader = BufferedReader::new("hello\nworld\n");
+let mut writer = BufferedWriter::new();
+let env = SandboxEnvironment::default();
+let mut cmd = BlockedCommandExecutor;
+
+engine.execute("{ print $0 }", &mut reader, &mut writer, &env, &mut cmd).unwrap();
+assert_eq!(writer.output, "hello\nworld\n");
+```
+
+### 2. WASI CLI (`wawk-wasi`)
+
+Standalone command-line binary compiled to `wasm32-wasip2`:
+
+```bash
+echo "hello\nworld" | wawk '{ print $0 }'
+```
+
+### 3. Bindgen — JS / Browser (`wawk-bindgen`)
+
+Browser and Node.js bindings generated via `wasm-bindgen`:
+
+```javascript
+import init, { exec_awk } from './wawk.js';
+await init();
+const result = exec_awk('{ print $1, $2 }', 'hello world\nfoo bar\n');
+```
+
+### Dispatcher Codegen (`wawk-codegen`)
+
+Build-time code generation for the dynamic extension dispatch system. Reads an `extension-manifest.json` and generates a complete WASM dispatcher component project.
+
+```bash
+# Generate dispatcher project from manifest
+cargo run -p wawk-codegen -- <manifest.json> <output-dir>
+
+# Dry run (print to stdout)
+cargo run -p wawk-codegen -- <manifest.json> <output-dir> --dry-run
+```
+
+**Generated output:**
+
+- `Cargo.toml` — WASM component project configuration
+- `src/lib.rs` — crate root with `wit_bindgen::generate!` and all interface mappings
+- `src/dispatcher.rs` — namespace-based routing (e.g. `compute.evaluate` -> extension)
+- `wit/dispatcher.wit` — dispatcher world importing all extension + host-services interfaces
+- `wit/deps/extensions/world.wit` — extension interface definitions
+- `wit/deps/services/host-services.wit` — host callback interface
+
+## POSIX AWK Compliance
+
+Full POSIX AWK support: patterns, field splitting, built-in variables (NR, NF, FS, OFS, RS, ORS, FILENAME, FNR, ARGV, ARGC), built-in functions (50+), user-defined functions, associative arrays, control flow, and ERE regex.
+
+See [AWK_COMPAT.md](AWK_COMPAT.md) for the complete compatibility matrix.
+
+## Optimizations
+
+- Zero-allocation hot paths with reusable buffers
+- Format auto-detection skip for plain text (first-byte check)
+- Ultra-fast `print $N` with zero-copy direct write
+- FxHashMap for O(1) variable/array lookups
+- Deferred field materialization (byte ranges, no String alloc)
+- Single-hot-rule dispatch for single-pattern programs
+- Pre-compiled regex with NFA engine (ReDoS-immune)
+- `itoa`/`ryu` for fast number formatting
+- Single-pass whitespace splitting
+- Leaf expression depth check bypass
 
 ## Testing
 
@@ -158,33 +202,6 @@ python3 crates/wawk-bindgen/tests/wasmtime_tests.py
 ```
 
 **228+ tests**, all passing.
-
-## Dispatcher Codegen (`wawk-codegen`)
-
-Build-time code generation tool for the dynamic plugin dispatch system. Reads a `plugin-manifest.json` and generates a complete WASM dispatcher component project.
-
-```bash
-# Generate dispatcher project from manifest
-cargo run -p wawk-codegen -- <manifest.json> <output-dir>
-
-# Dry run (print to stdout)
-cargo run -p wawk-codegen -- <manifest.json> <output-dir> --dry-run
-```
-
-**Generated output:**
-- `Cargo.toml` — WASM component project configuration
-- `src/lib.rs` — crate root with `wit_bindgen::generate!` and all interface mappings
-- `src/dispatcher.rs` — namespace-based routing (e.g. `product-a.lookup` → plugin)
-- `wit/dispatcher.wit` — dispatcher world importing all plugin + host-services interfaces
-- `wit/deps/plugins/world.wit` — plugin interface definitions
-- `wit/deps/services/host-services.wit` — host callback interface
-
-**Architecture:** Each product (mcp-server-*) has a `plugin-manifest.json` declaring its plugin dependencies. The codegen produces a dispatcher that routes tool calls by namespace prefix to the correct plugin via WIT imports. The dispatcher WASM is composed with plugin WASMs via `wac plug` into the wawk-mcp host.
-
-## Delivery Vehicles
-
-1. **Native CLI** (`wawk-wasi`): Standalone binary via WASI
-2. **NPM package** (`wawk-bindgen`): Browser and Node.js via wasm-bindgen
 
 ## License
 

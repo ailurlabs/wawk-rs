@@ -396,7 +396,7 @@ fn test_e3_security_manager_tracks_output() {
 #[test]
 fn test_e4_audit_log_normal_operation() {
     // E4-T1: < 1024 entries → all logged
-    use wawk_core::eval::security::{SecurityManager, MAX_AUDIT_LOG_ENTRIES};
+    use wawk_core::eval::security::SecurityManager;
     use wawk_core::eval::AuditEvent;
 
     let mut sec = SecurityManager::new();

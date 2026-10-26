@@ -13,35 +13,35 @@ use crate::types::PropertyTree;
 /// Handlers are sorted by priority (lower number = higher priority).
 /// Detection iterates handlers in priority order and returns the first match.
 pub struct FormatRegistry {
-    plugins: Vec<Box<dyn FormatDispatcher>>,
+    extensions: Vec<Box<dyn FormatDispatcher>>,
 }
 
 impl FormatRegistry {
     /// Create an empty format registry.
     pub fn new() -> Self {
         Self {
-            plugins: Vec::new(),
+            extensions: Vec::new(),
         }
     }
 
-    /// Register a format plugin. Plugins are re-sorted by priority after insertion.
-    pub fn register(&mut self, plugin: Box<dyn FormatDispatcher>) {
-        self.plugins.push(plugin);
-        self.plugins.sort_by_key(|p| p.priority());
+    /// Register a format extension. Extensions are re-sorted by priority after insertion.
+    pub fn register(&mut self, extension: Box<dyn FormatDispatcher>) {
+        self.extensions.push(extension);
+        self.extensions.sort_by_key(|p| p.priority());
     }
 
-    /// Detect the format of `input` and parse it if a plugin matches.
+    /// Detect the format of `input` and parse it if a extension matches.
     ///
-    /// Returns `Some(Ok((tree, format_name)))` if a plugin detected and parsed successfully.
-    /// Returns `Some(Err(...))` if a plugin detected but parsing failed.
-    /// Returns `None` if no plugin matched.
+    /// Returns `Some(Ok((tree, format_name)))` if a extension detected and parsed successfully.
+    /// Returns `Some(Err(...))` if a extension detected but parsing failed.
+    /// Returns `None` if no extension matched.
     pub fn detect_and_parse(&self, input: &str) -> Option<AwkResult<(PropertyTree, String)>> {
-        for plugin in &self.plugins {
-            if plugin.detect(input) {
+        for extension in &self.extensions {
+            if extension.detect(input) {
                 return Some(
-                    plugin
+                    extension
                         .parse(input)
-                        .map(|pt| (pt, plugin.name().to_string())),
+                        .map(|pt| (pt, extension.name().to_string())),
                 );
             }
         }
@@ -50,38 +50,43 @@ impl FormatRegistry {
 
     /// Serialize a `PropertyTree` to a specific format (or the first available).
     ///
-    /// If `format` is `Some(name)`, only the plugin with that name is used.
-    /// If `format` is `None`, plugins are tried in priority order.
+    /// If `format` is `Some(name)`, only the extension with that name is used.
+    /// If `format` is `None`, extensions are tried in priority order.
     pub fn serialize(&self, tree: &PropertyTree, format: Option<&str>) -> Option<String> {
         if let Some(name) = format {
-            for plugin in &self.plugins {
-                if plugin.name() == name {
-                    return plugin.serialize(tree);
+            for extension in &self.extensions {
+                if extension.name() == name {
+                    return extension.serialize(tree);
                 }
             }
         }
-        // Fallback: try all plugins in priority order
-        for plugin in &self.plugins {
-            if let Some(output) = plugin.serialize(tree) {
+        // Fallback: try all extensions in priority order
+        for extension in &self.extensions {
+            if let Some(output) = extension.serialize(tree) {
                 return Some(output);
             }
         }
         None
     }
 
-    /// Returns a slice of all registered plugins.
-    pub fn plugins(&self) -> &[Box<dyn FormatDispatcher>] {
-        &self.plugins
+    /// Look up a format handler by namespace.
+    pub fn get_by_namespace(&self, namespace: &str) -> Option<&dyn FormatDispatcher> {
+        self.extensions.iter().find(|p| p.namespace() == namespace).map(|p| p.as_ref())
     }
 
-    /// Returns the number of registered plugins.
+    /// Returns a slice of all registered extensions.
+    pub fn extensions(&self) -> &[Box<dyn FormatDispatcher>] {
+        &self.extensions
+    }
+
+    /// Returns the number of registered extensions.
     pub fn len(&self) -> usize {
-        self.plugins.len()
+        self.extensions.len()
     }
 
-    /// Returns true if no plugins are registered.
+    /// Returns true if no extensions are registered.
     pub fn is_empty(&self) -> bool {
-        self.plugins.is_empty()
+        self.extensions.is_empty()
     }
 }
 
@@ -107,16 +112,17 @@ mod tests {
 // ── B3 Test Mocks ──────────────────────────────────────────────
 
 /// Mock that always detects and parses successfully.
-struct MockSuccessPlugin {
+struct MockSuccessExtension {
     name: String,
     priority: u32,
 }
 
-impl crate::traits::PluginCapability for MockSuccessPlugin {
-    fn capability_name(&self) -> &'static str { "format_handler" }
+impl crate::traits::ExtensionCapability for MockSuccessExtension {
+    fn capability_name(&self) -> &'static str { "extension_formats" }
 }
 
-impl FormatDispatcher for MockSuccessPlugin {
+impl FormatDispatcher for MockSuccessExtension {
+    fn namespace(&self) -> &str { &self.name }
     fn name(&self) -> &str { &self.name }
     fn detect(&self, _input: &str) -> bool { true }
     fn parse(&self, _input: &str) -> AwkResult<PropertyTree> {
@@ -127,16 +133,17 @@ impl FormatDispatcher for MockSuccessPlugin {
 }
 
 /// Mock that detects but returns a parse error.
-struct MockErrorPlugin {
+struct MockErrorExtension {
     name: String,
     priority: u32,
 }
 
-impl crate::traits::PluginCapability for MockErrorPlugin {
-    fn capability_name(&self) -> &'static str { "format_handler" }
+impl crate::traits::ExtensionCapability for MockErrorExtension {
+    fn capability_name(&self) -> &'static str { "extension_formats" }
 }
 
-impl FormatDispatcher for MockErrorPlugin {
+impl FormatDispatcher for MockErrorExtension {
+    fn namespace(&self) -> &str { &self.name }
     fn name(&self) -> &str { &self.name }
     fn detect(&self, _input: &str) -> bool { true }
     fn parse(&self, _input: &str) -> AwkResult<PropertyTree> {
@@ -146,17 +153,18 @@ impl FormatDispatcher for MockErrorPlugin {
     fn priority(&self) -> u32 { self.priority }
 }
 
-/// Mock that never detects (passes through to next plugin).
-struct MockNoDetectPlugin {
+/// Mock that never detects (passes through to next extension).
+struct MockNoDetectExtension {
     name: String,
     priority: u32,
 }
 
-impl crate::traits::PluginCapability for MockNoDetectPlugin {
-    fn capability_name(&self) -> &'static str { "format_handler" }
+impl crate::traits::ExtensionCapability for MockNoDetectExtension {
+    fn capability_name(&self) -> &'static str { "extension_formats" }
 }
 
-impl FormatDispatcher for MockNoDetectPlugin {
+impl FormatDispatcher for MockNoDetectExtension {
+    fn namespace(&self) -> &str { &self.name }
     fn name(&self) -> &str { &self.name }
     fn detect(&self, _input: &str) -> bool { false }
     fn parse(&self, _input: &str) -> AwkResult<PropertyTree> {
@@ -167,16 +175,17 @@ impl FormatDispatcher for MockNoDetectPlugin {
 }
 
 /// Mock that detects only JSON-like input (starts with `{`).
-struct MockJsonLikePlugin {
+struct MockJsonLikeExtension {
     name: String,
     priority: u32,
 }
 
-impl crate::traits::PluginCapability for MockJsonLikePlugin {
-    fn capability_name(&self) -> &'static str { "format_handler" }
+impl crate::traits::ExtensionCapability for MockJsonLikeExtension {
+    fn capability_name(&self) -> &'static str { "extension_formats" }
 }
 
-impl FormatDispatcher for MockJsonLikePlugin {
+impl FormatDispatcher for MockJsonLikeExtension {
+    fn namespace(&self) -> &str { &self.name }
     fn name(&self) -> &str { &self.name }
     fn detect(&self, input: &str) -> bool {
         input.trim().starts_with('{')
@@ -190,35 +199,35 @@ impl FormatDispatcher for MockJsonLikePlugin {
 
 // ── B3 Tests (Lyra spec requirements 1-6) ──────────────────────
 
-/// B3-T1: Format plugin successfully parses input -> used.
-/// Requirement: "Format plugin successfully parses input -> used"
+/// B3-T1: Format extension successfully parses input -> used.
+/// Requirement: "Format extension successfully parses input -> used"
 #[test]
-fn test_b3_format_plugin_successfully_parses() {
+fn test_b3_format_extension_successfully_parses() {
     let mut registry = FormatRegistry::new();
-    registry.register(Box::new(MockSuccessPlugin {
+    registry.register(Box::new(MockSuccessExtension {
         name: "mock_success".to_string(),
         priority: 10,
     }));
 
     let result = registry.detect_and_parse("any input");
-    assert!(result.is_some(), "detect_and_parse should return Some when plugin detects");
+    assert!(result.is_some(), "detect_and_parse should return Some when extension detects");
     let parsed = result.unwrap().expect("parse should succeed");
     assert_eq!(parsed.0, PropertyTree::String("parsed_ok".to_string()));
     assert_eq!(parsed.1, "mock_success");
 }
 
-/// B3-T2: Format plugin returns Err -> error propagated.
-/// Requirement: "Format plugin returns Err(...) -> error propagated"
+/// B3-T2: Format extension returns Err -> error propagated.
+/// Requirement: "Format extension returns Err(...) -> error propagated"
 #[test]
-fn test_b3_format_plugin_error_propagated() {
+fn test_b3_format_extension_error_propagated() {
     let mut registry = FormatRegistry::new();
-    registry.register(Box::new(MockErrorPlugin {
+    registry.register(Box::new(MockErrorExtension {
         name: "mock_error".to_string(),
         priority: 10,
     }));
 
     let result = registry.detect_and_parse("any input");
-    assert!(result.is_some(), "detect_and_parse should return Some when plugin detects");
+    assert!(result.is_some(), "detect_and_parse should return Some when extension detects");
     let err = result.unwrap().expect_err("parse should fail");
     match err {
         crate::error::AwkError::RuntimeError(msg) => {
@@ -228,47 +237,47 @@ fn test_b3_format_plugin_error_propagated() {
     }
 }
 
-/// B3-T3: All format plugins return no-detect -> None (default parsing).
-/// Requirement: "If all format plugins return Ok(None), fall back to default parsing"
-/// Note: detect_and_parse returns None when no plugin detects, signaling caller
+/// B3-T3: All format extensions return no-detect -> None (default parsing).
+/// Requirement: "If all format extensions return Ok(None), fall back to default parsing"
+/// Note: detect_and_parse returns None when no extension detects, signaling caller
 /// to use default parsing.
 #[test]
-fn test_b3_all_plugins_no_detect_falls_to_default() {
+fn test_b3_all_extensions_no_detect_falls_to_default() {
     let mut registry = FormatRegistry::new();
-    registry.register(Box::new(MockNoDetectPlugin {
+    registry.register(Box::new(MockNoDetectExtension {
         name: "no_detect_1".to_string(),
         priority: 10,
     }));
-    registry.register(Box::new(MockNoDetectPlugin {
+    registry.register(Box::new(MockNoDetectExtension {
         name: "no_detect_2".to_string(),
         priority: 20,
     }));
 
     let result = registry.detect_and_parse("plain text input");
-    assert!(result.is_none(), "detect_and_parse should return None when no plugin detects (caller uses default parsing)");
+    assert!(result.is_none(), "detect_and_parse should return None when no extension detects (caller uses default parsing)");
 }
 
-/// B3-T4: First plugin doesn't detect, second does -> second is used.
-/// Requirement: "If format plugin returns Ok(None), try next format plugin"
+/// B3-T4: First extension doesn't detect, second does -> second is used.
+/// Requirement: "If format extension returns Ok(None), try next format extension"
 /// Note: In our API, detect()=false means "try next". This tests priority ordering.
 #[test]
 fn test_b3_first_no_detect_second_succeeds() {
     let mut registry = FormatRegistry::new();
     // Higher priority (lower number) but doesn't detect
-    registry.register(Box::new(MockNoDetectPlugin {
+    registry.register(Box::new(MockNoDetectExtension {
         name: "no_detect".to_string(),
         priority: 10,
     }));
     // Lower priority (higher number) but detects
-    registry.register(Box::new(MockSuccessPlugin {
+    registry.register(Box::new(MockSuccessExtension {
         name: "success".to_string(),
         priority: 20,
     }));
 
     let result = registry.detect_and_parse("any input");
-    assert!(result.is_some(), "second plugin should detect");
+    assert!(result.is_some(), "second extension should detect");
     let parsed = result.unwrap().expect("parse should succeed");
-    assert_eq!(parsed.1, "success", "second plugin should be used");
+    assert_eq!(parsed.1, "success", "second extension should be used");
 }
 
 /// B3-T5: Priority ordering - lower priority number = tried first.
@@ -276,11 +285,11 @@ fn test_b3_first_no_detect_second_succeeds() {
 fn test_b3_priority_ordering() {
     let mut registry = FormatRegistry::new();
     // Both detect, but different priorities
-    registry.register(Box::new(MockSuccessPlugin {
+    registry.register(Box::new(MockSuccessExtension {
         name: "low_priority".to_string(),
         priority: 50,
     }));
-    registry.register(Box::new(MockSuccessPlugin {
+    registry.register(Box::new(MockSuccessExtension {
         name: "high_priority".to_string(),
         priority: 5,
     }));
@@ -288,23 +297,23 @@ fn test_b3_priority_ordering() {
     let result = registry.detect_and_parse("any input");
     assert!(result.is_some());
     let parsed = result.unwrap().expect("parse should succeed");
-    assert_eq!(parsed.1, "high_priority", "higher priority (lower number) plugin should be tried first");
+    assert_eq!(parsed.1, "high_priority", "higher priority (lower number) extension should be tried first");
 }
 
-/// B3-T6: Selective detection - only matching plugin is used.
+/// B3-T6: Selective detection - only matching extension is used.
 #[test]
 fn test_b3_selective_detection() {
     let mut registry = FormatRegistry::new();
-    registry.register(Box::new(MockJsonLikePlugin {
+    registry.register(Box::new(MockJsonLikeExtension {
         name: "json_like".to_string(),
         priority: 10,
     }));
-    registry.register(Box::new(MockSuccessPlugin {
+    registry.register(Box::new(MockSuccessExtension {
         name: "catch_all".to_string(),
         priority: 100,
     }));
 
-    // JSON-like input should be caught by json_like plugin
+    // JSON-like input should be caught by json_like extension
     let json_result = registry.detect_and_parse("{\"key\": \"value\"}");
     assert!(json_result.is_some());
     let parsed = json_result.unwrap().expect("parse should succeed");
@@ -325,25 +334,51 @@ fn test_b3_empty_registry_returns_none() {
     assert!(result.is_none(), "empty registry should return None (default parsing)");
 }
 
-/// B3-T8: Error from higher-priority plugin is NOT swallowed by lower-priority plugin.
-/// When a plugin detects but fails to parse, the error propagates immediately.
+/// B3-T8: Error from higher-priority extension is NOT swallowed by lower-priority extension.
+/// When a extension detects but fails to parse, the error propagates immediately.
 #[test]
 fn test_b3_error_not_swallowed_by_fallthrough() {
     let mut registry = FormatRegistry::new();
     // High priority: detects but errors
-    registry.register(Box::new(MockErrorPlugin {
-        name: "error_plugin".to_string(),
+    registry.register(Box::new(MockErrorExtension {
+        name: "error_extension".to_string(),
         priority: 10,
     }));
     // Low priority: would succeed if tried
-    registry.register(Box::new(MockSuccessPlugin {
-        name: "success_plugin".to_string(),
+    registry.register(Box::new(MockSuccessExtension {
+        name: "success_extension".to_string(),
         priority: 50,
     }));
 
     let result = registry.detect_and_parse("any input");
     assert!(result.is_some());
-    assert!(result.unwrap().is_err(), "error from detecting plugin should propagate, not fall through");
+    assert!(result.unwrap().is_err(), "error from detecting extension should propagate, not fall through");
+}
+
+
+/// Test get_by_namespace lookup.
+#[test]
+fn test_get_by_namespace() {
+    let mut registry = FormatRegistry::new();
+    registry.register(Box::new(MockSuccessExtension {
+        name: "alpha".to_string(),
+        priority: 10,
+    }));
+    registry.register(Box::new(MockJsonLikeExtension {
+        name: "beta".to_string(),
+        priority: 20,
+    }));
+
+    let found = registry.get_by_namespace("alpha");
+    assert!(found.is_some(), "should find extension by namespace");
+    assert_eq!(found.unwrap().name(), "alpha");
+
+    let found = registry.get_by_namespace("beta");
+    assert!(found.is_some(), "should find second extension by namespace");
+    assert_eq!(found.unwrap().name(), "beta");
+
+    let not_found = registry.get_by_namespace("nonexistent");
+    assert!(not_found.is_none(), "should return None for unknown namespace");
 }
 
 }

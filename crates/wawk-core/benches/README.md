@@ -21,7 +21,7 @@ cargo bench -p wawk-core -- conditional
 cargo bench -p wawk-core -- associative_array
 cargo bench -p wawk-core -- lexer_bench
 cargo bench -p wawk-core -- parser_bench
-cargo bench -p wawk-core -- plugin_dispatch
+cargo bench -p wawk-core -- extension_dispatch
 ```
 
 Run a benchmark group:
@@ -29,7 +29,7 @@ Run a benchmark group:
 ```bash
 cargo bench -p wawk-core -- awk/        # all AWK workload benchmarks
 cargo bench -p wawk-core -- parser/     # lexer and parser benchmarks
-cargo bench -p wawk-core -- plugin/     # plugin dispatch benchmarks
+cargo bench -p wawk-core -- extension/     # extension dispatch benchmarks
 ```
 
 ## Benchmark descriptions
@@ -52,11 +52,11 @@ cargo bench -p wawk-core -- plugin/     # plugin dispatch benchmarks
 | `lexer_bench` | Tokenize a complex AWK script (50 repetitions) - measures lexer throughput in bytes/second |
 | `parser_bench` | Parse a complex AWK script (50 repetitions) - measures full parse pipeline throughput |
 
-### Plugin benchmarks
+### Extension benchmarks
 
 | Benchmark | Description |
 |---|---|
-| `plugin_dispatch` | Measures overhead of external function dispatch using a mock handler that returns immediately |
+| `extension_dispatch` | Measures overhead of external function dispatch using a mock handler that returns immediately |
 
 ## Output
 

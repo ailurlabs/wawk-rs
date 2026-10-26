@@ -1,4 +1,4 @@
-//! Bridge between FormatDispatcher trait and WIT plugin interface.
+//! Bridge between FormatDispatcher trait and WIT extension interface.
 //!
 //! Allows Wasm format handlers (routed through the host-supplied dispatcher)
 //! to provide format detection/parsing/serialization. Handlers use convention-based
@@ -12,9 +12,9 @@ use crate::types::PropertyTree;
 
 /// A FormatDispatcher that delegates to a WIT function handler.
 ///
-/// This bridges the format handler system with the existing WIT plugin bridge.
+/// This bridges the format handler system with the existing WIT extension bridge.
 /// The WIT handler exports `__detect__`, `__parse__`, `__serialize__` functions
-/// via the plugin function interface.
+/// via the extension function interface.
 ///
 /// The handler is wrapped in a `Mutex` because `FormatDispatcher` methods
 /// take `&self` while `FunctionDispatcher::dispatch` requires `&mut self`.
@@ -44,13 +44,17 @@ impl WitFormatDispatcher {
     }
 }
 
-impl crate::traits::PluginCapability for WitFormatDispatcher {
+impl crate::traits::ExtensionCapability for WitFormatDispatcher {
     fn capability_name(&self) -> &'static str {
-        "format_handler"
+        "extension_formats"
     }
 }
 
 impl FormatDispatcher for WitFormatDispatcher {
+    fn namespace(&self) -> &str {
+        &self.name
+    }
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -69,7 +73,7 @@ impl FormatDispatcher for WitFormatDispatcher {
             Ok(Some(json)) => crate::eval::input::json_parse(&json)
                 .map_err(|e| AwkError::RuntimeError(format!("WIT format parse error: {}", e))),
             Ok(None) => Err(AwkError::RuntimeError(
-                "WIT format plugin returned None".into(),
+                "WIT format extension returned None".into(),
             )),
             Err(e) => Err(e),
         }

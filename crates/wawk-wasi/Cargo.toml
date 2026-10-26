@@ -1,6 +1,6 @@
 [package]
 name = "wawk-wasi"
-description = "WASM component CLI for wawk-core — composable with WIT plugins via wac plug"
+description = "WASM component CLI for wawk-core — composable with WIT extensions via wac plug"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -23,7 +23,7 @@ world = "cli-runner"
 "wasi:filesystem" = { path = "wit/deps/filesystem" }
 "wasi:sockets" = { path = "wit/deps/sockets" }
 "wasi:random" = { path = "wit/deps/random" }
-"wawk:plugins" = { path = "wit/deps/plugins" }
+"wawk:extensions" = { path = "wit/deps/extensions" }
 
 [lib]
 name = "wawk_wasi"

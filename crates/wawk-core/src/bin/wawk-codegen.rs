@@ -1,4 +1,4 @@
-//! wawk-codegen CLI — generate dispatcher project from a plugin manifest.
+//! wawk-codegen CLI — generate dispatcher project from a extension manifest.
 //!
 //! Usage:
 //!   wawk-codegen <MANIFEST_PATH> <OUTPUT_DIR>
@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::path::PathBuf;
-use wawk_codegen::{
+use wawk_core::dispatcher::{
     generate_cargo_toml, generate_dispatcher_rs, generate_dispatcher_wit, generate_lib_rs,
     load_manifest, write_dispatcher,
 };
@@ -14,11 +14,11 @@ use wawk_codegen::{
 #[derive(Parser, Debug)]
 #[command(
     name = "wawk-codegen",
-    about = "Generate dispatcher project (WIT + Rust + Cargo.toml) from a plugin-manifest.json",
+    about = "Generate dispatcher project (WIT + Rust + Cargo.toml) from a extension-manifest.json",
     version
 )]
 struct Cli {
-    /// Path to plugin-manifest.json
+    /// Path to extension-manifest.json
     #[arg(value_name = "MANIFEST_PATH")]
     manifest: PathBuf,
 
@@ -44,10 +44,10 @@ fn main() -> Result<()> {
 
     let manifest = load_manifest(&cli.manifest)?;
     eprintln!(
-        "Loaded manifest: {} v{} ({} plugins)",
+        "Loaded manifest: {} v{} ({} extensions)",
         manifest.name,
         manifest.version,
-        manifest.plugins.len()
+        manifest.extensions.len()
     );
 
     if cli.dry_run {

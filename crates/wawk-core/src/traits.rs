@@ -309,7 +309,7 @@ pub struct BlockedCommandExecutor;
 impl AwkCommandExecutor for BlockedCommandExecutor {
     fn execute(&mut self, _cmd: &str) -> AwkResult<String> {
         Err(crate::error::AwkError::RuntimeError(
-            "system() is not available in the WASM sandbox. Use a WIT plugin for host-provided command execution.".to_string()
+            "system() is not available in the WASM sandbox. Use a WIT extension for host-provided command execution.".to_string()
         ))
     }
 }
@@ -350,14 +350,14 @@ impl IncludeResolver for SandboxIncludeResolver {
     }
 }
 
-/// Base trait for all plugin capabilities.
+/// Base trait for all extension capabilities.
 ///
-/// Maps to the WIT `wawk:plugins` package. Both `FunctionDispatcher` and
+/// Maps to the WIT `wawk:extensions` package. Both `FunctionDispatcher` and
 /// `FormatDispatcher` extend this trait, showing they are both ways to
-/// extend AWK through the unified WIT plugin system.
-pub trait PluginCapability {
-    /// The capability identifier, matching `PluginMeta.capabilities` values.
-    /// E.g., "function_dispatch", "format_handler".
+/// extend AWK through the unified WIT extension system.
+pub trait ExtensionCapability {
+    /// The capability identifier, matching `ExtensionMeta.capabilities` values.
+    /// E.g., "function_dispatch", "extension_formats".
     fn capability_name(&self) -> &'static str;
 }
 
@@ -369,10 +369,10 @@ pub trait PluginCapability {
 ///
 /// Implementors override `dispatch` to handle function names.
 /// Return `Ok(Some(result))` if handled, `Ok(None)` if the function
-/// is unknown (the host will try the next plugin).
+/// is unknown (the host will try the next extension).
 ///
-/// Maps to WIT interface: `wawk:plugins/PLUGINNAME-functions`
-pub trait FunctionDispatcher: PluginCapability {
+/// Maps to WIT interface: `wawk:extensions/EXTENSIONNAME-functions`
+pub trait FunctionDispatcher: ExtensionCapability {
     /// Dispatch a function call. Qualified calls arrive as "namespace.function" in the name.
     /// Routing strategy is implementing by the host.
     fn dispatch(&mut self, name: &str, args: &[String]) -> AwkResult<Option<String>> {
@@ -387,7 +387,10 @@ pub trait FunctionDispatcher: PluginCapability {
 /// They convert between text format and PropertyTree.
 ///
 /// Convention-based via `__detect__`, `__parse__`, `__serialize__` functions.
-pub trait FormatDispatcher: PluginCapability + Send + Sync {
+pub trait FormatDispatcher: ExtensionCapability + Send + Sync {
+    /// Return the namespace identifier for this format handler (e.g., "json", "xml").
+    fn namespace(&self) -> &str;
+
     /// Format name (e.g., "json", "csv")
     fn name(&self) -> &str;
 
