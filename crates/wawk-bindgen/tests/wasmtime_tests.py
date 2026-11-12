@@ -4,7 +4,8 @@ import subprocess
 import sys
 import os
 
-WAWK = "/home/charo/wawk-rs/target/wasm32-wasip1/release/wawk.wasm"
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+WAWK = os.environ.get("WAWK_WASM") or os.path.join(REPO_ROOT, "target", "wasm32-wasip1", "release", "wawk.wasm")
 WASMTIME = os.path.expanduser("~/.cargo/bin/wasmtime")
 
 d = chr(36)  # dollar sign

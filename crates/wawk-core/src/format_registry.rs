@@ -197,7 +197,7 @@ impl FormatDispatcher for MockJsonLikeExtension {
     fn priority(&self) -> u32 { self.priority }
 }
 
-// ── B3 Tests (Lyra spec requirements 1-6) ──────────────────────
+// ── B3 Tests (format extension requirements 1-6) ──────────────────────
 
 /// B3-T1: Format extension successfully parses input -> used.
 /// Requirement: "Format extension successfully parses input -> used"

@@ -112,6 +112,18 @@ Sandboxed execution with deterministic output. No PII processing. See [SECURITY.
 
 ## Build Targets
 
+### Supported Surfaces
+
+The workspace defaults to `wasm32-wasip2` (see `.cargo/config.toml`): the `wawk-wasi` lib crate is `crate-type = ["cdylib"]` and wit-bindgen 0.42 export-name mangling (`wasi:cli/run@0.2.6#run`) breaks the ELF linker version script on native hosts, so the cdylib only links under the component target. Two explicit host-side paths are supported and tested:
+
+```bash
+make build         # workspace build on the default wasip2 target
+make test          # cargo test --workspace --target x86_64-unknown-linux-gnu
+make wasi          # production component: cargo component build -p wawk-wasi --release --target wasm32-wasip2
+```
+
+Any other native `cargo run`/`cargo test` on the default target will produce a wasm binary the host cannot execute — always pass an explicit `--target` for host binaries.
+
 ### 1. Library (Rust DSL)
 
 Use `wawk-core` directly as a Rust library:
@@ -153,11 +165,11 @@ const result = exec_awk('{ print $1, $2 }', 'hello world\nfoo bar\n');
 Build-time code generation for the dynamic extension dispatch system. Reads an `extension-manifest.json` and generates a complete WASM dispatcher component project.
 
 ```bash
-# Generate dispatcher project from manifest
-cargo run -p wawk-codegen -- <manifest.json> <output-dir>
+# Generate dispatcher project from manifest (host binary — pin the host target)
+cargo run -p wawk-core --bin wawk-codegen --target x86_64-unknown-linux-gnu -- <manifest.json> <output-dir>
 
 # Dry run (print to stdout)
-cargo run -p wawk-codegen -- <manifest.json> <output-dir> --dry-run
+cargo run -p wawk-core --bin wawk-codegen --target x86_64-unknown-linux-gnu -- <manifest.json> <output-dir> --dry-run
 ```
 
 **Generated output:**
@@ -168,6 +180,8 @@ cargo run -p wawk-codegen -- <manifest.json> <output-dir> --dry-run
 - `wit/dispatcher.wit` — dispatcher world importing all extension + host-services interfaces
 - `wit/deps/extensions/world.wit` — extension interface definitions
 - `wit/deps/services/host-services.wit` — host callback interface
+
+**Interface dedup**: multiple extensions in one manifest may declare the same interface name (e.g. the unified `extension-functions`). Because each interface body is a fixed template keyed only by the name, the generator emits every distinct name exactly once (world imports, deps definitions, and `with:` bindings). Dedup is byte-exact by construction — see `CHANGELOG.md` 2026-11-03 and the `dispatcher::tests::test_dedup_*` regression tests.
 
 ## POSIX AWK Compliance
 

@@ -15,8 +15,9 @@ def _pin_cpu():
     except (AttributeError, OSError):
         pass
 
-WAWK_NATIVE = "/home/charo/wawk-rs/target/release/wawk"
-WAWK_WASM = "/home/charo/wawk-rs/target/wasm32-wasip1/release/wawk.wasm"
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WAWK_NATIVE = os.environ.get("WAWK_NATIVE") or os.path.join(REPO_ROOT, "target", "release", "wawk")
+WAWK_WASM = os.environ.get("WAWK_WASM") or os.path.join(REPO_ROOT, "target", "wasm32-wasip1", "release", "wawk.wasm")
 WASMTIME = os.path.expanduser("~/.cargo/bin/wasmtime")
 
 d = chr(36)

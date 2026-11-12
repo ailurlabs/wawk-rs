@@ -1,0 +1,16 @@
+{
+  "name": "test-product",
+  "version": "1.0.0",
+  "description": "Test product for wac plug automation validation",
+  "extensions": [
+    {
+      "name": "hello",
+      "interface": "hello-functions",
+      "format": false,
+      "description": "Hello world test extension"
+    }
+  ],
+  "host_services": {
+    "log": "Logging service"
+  }
+}
