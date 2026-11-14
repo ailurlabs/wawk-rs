@@ -1,0 +1,11 @@
+# Pinned toolchain for reproducible builds (remediation package revB1, F13).
+# rustc / cargo : 1.96.0
+# Companion tools (installed separately, documented here for reproducibility):
+#   cargo-component 0.21.1
+#   wasm-tools      1.258.0
+#   wasmtime        47.0.3
+#   wac-cli         0.10.1
+#   wit-bindgen-cli 0.42.0
+[toolchain]
+channel = "1.96.0"
+targets = ["wasm32-wasip1", "wasm32-wasip2"]

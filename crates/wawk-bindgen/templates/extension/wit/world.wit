@@ -1,0 +1,29 @@
+/// Canonical WIT interfaces for wawk extensions.
+///
+/// Each extension exports a unique interface named EXTENSIONNAME-functions.
+/// Format interfaces are optional — only extensions with real format handling export them.
+
+package wawk:extensions;
+
+/// Extension function interface — dispatch a tool call by name with JSON arguments.
+interface EXTENSIONNAME-functions {
+    call: func(name: string, args: list<string>) -> option<string>;
+}
+
+/// Optional format handling for extensions that parse/serialize document formats.
+interface EXTENSIONNAME-format {
+    detect: func(input: string) -> string;
+    parse: func(input: string) -> string;
+    serialize: func(tree-json: string) -> string;
+}
+
+/// Default world for extensions WITHOUT format handling.
+world wawk-extension {
+    export EXTENSIONNAME-functions;
+}
+
+/// World for extensions WITH format handling.
+world wawk-extension-with-format {
+    export EXTENSIONNAME-functions;
+    export EXTENSIONNAME-format;
+}
